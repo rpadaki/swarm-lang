@@ -145,16 +145,31 @@ class Parser:
         self.advance()
         names = []
         bindings = {}
-        name, binding = self._parse_reg_name()
-        names.append(name)
-        if binding:
-            bindings[name] = binding
-        while self.match("COMMA"):
+        initializers = {}
+        if self.match("LPAREN"):
+            while not self.match("RPAREN"):
+                name, binding = self._parse_reg_name()
+                names.append(name)
+                if binding:
+                    bindings[name] = binding
+                if self.match("OP", "="):
+                    initializers[name] = self.parse_expr()
+                self.match("COMMA")
+        else:
             name, binding = self._parse_reg_name()
             names.append(name)
             if binding:
                 bindings[name] = binding
-        return RegDecl(names, bindings)
+            if self.match("OP", "="):
+                initializers[name] = self.parse_expr()
+            while self.match("COMMA"):
+                name, binding = self._parse_reg_name()
+                names.append(name)
+                if binding:
+                    bindings[name] = binding
+                if self.match("OP", "="):
+                    initializers[name] = self.parse_expr()
+        return RegDecl(names, bindings, initializers)
 
     def _parse_reg_name(self):
         name = self.expect("IDENT").value

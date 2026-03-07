@@ -7,7 +7,11 @@
   "become" "break" "continue" "exit"
   "const" "register" "tag" "bool"
   "import" "export"
+  "package" "using" "extern" "action" "local"
 ] @keyword
+
+; ── Annotations ──
+["volatile" "stable"] @attribute
 
 ; ── Actions (tick-consuming) ──
 ["move" "pickup" "drop"] @function
@@ -42,12 +46,25 @@
 ; ── Import path ──
 (import_statement path: (string) @string)
 
+; ── Package / Using ──
+(package_declaration name: (identifier) @type)
+(using_declaration name: (identifier) @type)
+
+; ── Compound assignment ──
+(compound_operator) @operator
+
+; ── Qualified names ──
+(qualified_name module: (identifier) @type)
+(qualified_name member: (identifier) @variable)
+
 ; ── Declarations ──
 (const_declaration name: (identifier) @constant)
 (export_const name: (identifier) @constant)
 (register_declaration name: (identifier) @variable)
+(extern_register_declaration name: (identifier) @variable)
 (bool_declaration name: (identifier) @variable)
 (tag_declaration name: (identifier) @label)
+(local_declaration name: (identifier) @variable)
 
 ; ── State/behavior/function names ──
 (state_definition name: (identifier) @type)
@@ -59,8 +76,7 @@
 
 ; ── Function parameters and return ──
 (parameter_list (identifier) @variable.parameter)
-(export_function return: (identifier) @type)
-(function_definition return: (identifier) @type)
+(return_annotation name: (identifier) @type)
 
 ; ── Exit declarations ──
 (exit_declaration name: (identifier) @label)
@@ -96,6 +112,7 @@
 
 ; ── Assignment targets ──
 (assignment target: (identifier) @variable)
+(compound_assignment target: (identifier) @variable)
 
 ; ── Punctuation ──
 ["{" "}"] @punctuation.bracket

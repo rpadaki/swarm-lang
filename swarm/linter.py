@@ -6,6 +6,7 @@ Parses using the compiler's Parser and checks for:
   - Unreachable states (not targeted by any transition)
   - Behaviors with unwired exits
   - States with no transitions out (no become in body)
+  - Stale reads (volatile-derived values used after a tick-consuming action)
 
 Usage:
     uv run python -m swarm check program.sw
@@ -145,12 +146,202 @@ def _has_outgoing_transition(stmts, func_defs=None):
     return False
 
 
+def _collect_efunc_map(prog) -> dict[str, ExportFunc]:
+    return {n.name: n for n in prog if isinstance(n, ExportFunc)}
+
+
+def _refs_in_cond(cond):
+    """Yield register name references read in a condition tuple."""
+    left, _op, right = cond
+    if isinstance(left, str):
+        yield left
+    elif isinstance(left, CallExpr):
+        for a in left.args:
+            if isinstance(a, str):
+                yield a
+    elif isinstance(left, Assignment):
+        yield from _refs_in_expr(left.expr)
+    if isinstance(right, str):
+        yield right
+
+
+def _cond_assigns(cond):
+    """Return the target register if the condition contains an assignment (`:=`), else None."""
+    left, _op, _right = cond
+    if isinstance(left, Assignment):
+        return left.target
+    return None
+
+
+def _cond_call_expr(cond):
+    """Return the CallExpr from a condition's LHS, if any."""
+    left, _op, _right = cond
+    if isinstance(left, Assignment) and isinstance(left.expr, CallExpr):
+        return left.expr
+    if isinstance(left, CallExpr):
+        return left
+    return None
+
+
+def _is_volatile_call(call_expr, efunc_map):
+    """Return True if a CallExpr invokes a volatile ExportFunc."""
+    if not isinstance(call_expr, CallExpr):
+        return False
+    ef = efunc_map.get(call_expr.func)
+    return ef is not None and ef.is_volatile
+
+
+def _is_action_stmt(stmt, efunc_map):
+    """Return True if an ActionStmt invokes an action ExportFunc."""
+    if not isinstance(stmt, ActionStmt):
+        return False
+    ef = efunc_map.get(stmt.func)
+    return ef is not None and ef.is_action
+
+
+def _check_stale_reads_block(stmts, efunc_map, func_defs, volatile, stale):
+    """Walk a block of statements, tracking volatile/stale registers.
+
+    Returns list of (register_name,) for each stale read detected.
+    Mutates `volatile` and `stale` sets in place.
+    """
+    warnings = []
+
+    for s in stmts:
+        if isinstance(s, Assignment):
+            # Check reads first (RHS may read stale registers)
+            for ref in _refs_in_expr(s.expr):
+                if ref in stale:
+                    warnings.append(ref)
+            # Assignment clears staleness and may introduce volatility
+            stale.discard(s.target)
+            volatile.discard(s.target)
+            if isinstance(s.expr, CallExpr) and _is_volatile_call(s.expr, efunc_map):
+                volatile.add(s.target)
+
+        elif isinstance(s, ActionStmt):
+            # Check reads in action args
+            for a in s.args:
+                if isinstance(a, str) and a in stale:
+                    warnings.append(a)
+            # If this is a tick-consuming action, all volatile regs become stale
+            if _is_action_stmt(s, efunc_map):
+                stale.update(volatile)
+
+        elif isinstance(s, IfStmt):
+            # Check reads in condition
+            for ref in _refs_in_cond(s.cond):
+                if ref in stale:
+                    warnings.append(ref)
+            # Condition assignment may clear/set volatility
+            tgt = _cond_assigns(s.cond)
+            if tgt:
+                stale.discard(tgt)
+                volatile.discard(tgt)
+                ce = _cond_call_expr(s.cond)
+                if ce and _is_volatile_call(ce, efunc_map):
+                    volatile.add(tgt)
+            # Recurse into branches (snapshot state, merge conservatively)
+            vol_snap, stale_snap = volatile.copy(), stale.copy()
+            warnings.extend(_check_stale_reads_block(
+                s.body, efunc_map, func_defs, volatile, stale))
+            vol_then, stale_then = volatile.copy(), stale.copy()
+            volatile.clear(); volatile.update(vol_snap)
+            stale.clear(); stale.update(stale_snap)
+            if s.else_body:
+                warnings.extend(_check_stale_reads_block(
+                    s.else_body, efunc_map, func_defs, volatile, stale))
+            # Merge: a register is volatile/stale if it is in either branch
+            volatile.update(vol_then)
+            stale.update(stale_then)
+
+        elif isinstance(s, WhileStmt):
+            for ref in _refs_in_cond(s.cond):
+                if ref in stale:
+                    warnings.append(ref)
+            tgt = _cond_assigns(s.cond)
+            if tgt:
+                stale.discard(tgt)
+                volatile.discard(tgt)
+                ce = _cond_call_expr(s.cond)
+                if ce and _is_volatile_call(ce, efunc_map):
+                    volatile.add(tgt)
+            warnings.extend(_check_stale_reads_block(
+                s.body, efunc_map, func_defs, volatile, stale))
+
+        elif isinstance(s, LoopStmt):
+            warnings.extend(_check_stale_reads_block(
+                s.body, efunc_map, func_defs, volatile, stale))
+
+        elif isinstance(s, MatchStmt):
+            if isinstance(s.var, str) and s.var in stale:
+                warnings.append(s.var)
+            elif isinstance(s.var, CallExpr):
+                for a in s.var.args:
+                    if isinstance(a, str) and a in stale:
+                        warnings.append(a)
+            vol_snap, stale_snap = volatile.copy(), stale.copy()
+            for c in s.cases:
+                volatile.clear(); volatile.update(vol_snap)
+                stale.clear(); stale.update(stale_snap)
+                warnings.extend(_check_stale_reads_block(
+                    c.body, efunc_map, func_defs, volatile, stale))
+                vol_snap.update(volatile)
+                stale_snap.update(stale)
+            if s.default_body:
+                volatile.clear(); volatile.update(vol_snap)
+                stale.clear(); stale.update(stale_snap)
+                warnings.extend(_check_stale_reads_block(
+                    s.default_body, efunc_map, func_defs, volatile, stale))
+                vol_snap.update(volatile)
+                stale_snap.update(stale)
+            volatile.clear(); volatile.update(vol_snap)
+            stale.clear(); stale.update(stale_snap)
+
+        elif isinstance(s, FuncCall):
+            if func_defs and s.name in func_defs:
+                warnings.extend(_check_stale_reads_block(
+                    func_defs[s.name].body, efunc_map, func_defs, volatile, stale))
+
+    return warnings
+
+
+def _check_stale_reads(prog, efunc_map, func_defs, behaviors):
+    """Check for stale reads across all states and init blocks."""
+    warnings = []
+    for node in prog:
+        body = None
+        if isinstance(node, InitBlock):
+            body = node.body
+        elif isinstance(node, StateBlock):
+            body = node.body
+        elif isinstance(node, StateFromBehavior):
+            beh = behaviors.get(node.behavior)
+            if beh:
+                body = beh.body
+        if body is None:
+            continue
+        volatile = set()
+        stale = set()
+        stale_names = _check_stale_reads_block(body, efunc_map, func_defs, volatile, stale)
+        seen = set()
+        for name in stale_names:
+            key = (getattr(node, 'name', 'init'), name)
+            if key not in seen:
+                seen.add(key)
+                warnings.append(
+                    f"stale read of '{name}' after action (value may have changed)"
+                )
+    return warnings
+
+
 def check(prog):
     warnings = []
     reg_names = _collect_register_names(prog)
     state_names = _collect_state_names(prog)
     behaviors = _collect_behavior_defs(prog)
     func_defs = _collect_func_defs(prog)
+    efunc_map = _collect_efunc_map(prog)
 
     # Gather all statement bodies for register usage analysis
     all_stmts = []
@@ -232,6 +423,9 @@ def check(prog):
         if isinstance(node, StateBlock):
             if not _has_outgoing_transition(node.body, func_defs):
                 warnings.append(f"state '{node.name}' has no outgoing transitions")
+
+    # Stale reads: volatile-derived values used after an action
+    warnings.extend(_check_stale_reads(prog, efunc_map, func_defs, behaviors))
 
     return warnings
 

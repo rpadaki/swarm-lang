@@ -88,6 +88,7 @@ class Compiler:
         self._pkg_consts: dict[str, str] = {}
         self._pkg_externs: dict[str, set[str]] = pkg_externs or {}
         self._extern_bindings: dict[str, str] = {}
+        self._reg_initializers: list[tuple[str, object]] = []
         self._build_package_index()
 
     def _build_package_index(self):
@@ -219,9 +220,14 @@ class Compiler:
                 self.tags[name] = str(auto_idx)
                 auto_idx += 1
 
-        if init:
+        has_init = init or self._reg_initializers
+        if has_init:
             self.emit_lbl("main")
-            for s in init.body: self._stmt(s)
+            for name, expr in self._reg_initializers:
+                tgt = self.R(name)
+                self._compile_expr_into(tgt, expr)
+            if init:
+                for s in init.body: self._stmt(s)
         for sb in states:
             self.emit_lbl(sb.name)
             if sb.name in self.tags:
@@ -272,6 +278,8 @@ class Compiler:
             self.emit(f".alias {n} {r}")
         for user_name, extern_qual in s.bindings.items():
             self._extern_bindings[extern_qual] = user_name
+        for name, expr in s.initializers.items():
+            self._reg_initializers.append((name, expr))
 
     def _booldecl(self, s):
         if not self.bool_reg:

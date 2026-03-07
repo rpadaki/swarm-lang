@@ -1,0 +1,191 @@
+"""Tests for swarm.linter, focusing on stale-read detection."""
+
+import unittest
+
+from swarm.tokenizer import tokenize
+from swarm.parser import Parser
+from swarm.compiler import resolve_imports
+from swarm.linter import check
+
+
+def lint_src(src: str) -> list[str]:
+    prog = Parser(tokenize(src)).parse_program()
+    prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=None)
+    return check(prog)
+
+
+def stale_warnings(warnings: list[str]) -> list[str]:
+    return [w for w in warnings if "stale read" in w]
+
+
+HEADER = """\
+import "libant"
+using ant
+register dir, dx, dy, next_st, last_dir
+"""
+
+
+class TestStaleReadAfterAction(unittest.TestCase):
+    def test_volatile_read_after_action_warns(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    dir = sense(FOOD)
+    move(RANDOM)
+    if dir != 0 { become s }
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 1)
+        self.assertIn("dir", warns[0])
+
+    def test_volatile_read_before_action_no_warning(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    dir = sense(FOOD)
+    if dir != 0 { become s }
+    move(RANDOM)
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 0)
+
+    def test_stable_read_after_action_no_warning(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    dir = carrying()
+    move(RANDOM)
+    if dir != 0 { become s }
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 0)
+
+    def test_reassignment_clears_staleness(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    dir = sense(FOOD)
+    move(RANDOM)
+    dir = 3
+    if dir != 0 { become s }
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 0)
+
+    def test_multiple_volatile_regs_stale(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    dir = sense(FOOD)
+    dx = smell(CH_RED)
+    move(RANDOM)
+    if dir != 0 { become s }
+    if dx != 0 { become s }
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 2)
+        names = " ".join(warns)
+        self.assertIn("dir", names)
+        self.assertIn("dx", names)
+
+    def test_no_action_no_stale(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    dir = sense(FOOD)
+    dx = smell(CH_RED)
+    if dir != 0 { become s }
+    if dx != 0 { become s }
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 0)
+
+    def test_nonvolatile_assignment_not_stale(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    dir = rand(5)
+    move(RANDOM)
+    if dir != 0 { become s }
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 0)
+
+    def test_condition_walrus_volatile(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    if dir := sense(FOOD) {
+        move(dir)
+        become s
+    }
+    move(RANDOM)
+    if dir != 0 { become s }
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 1)
+        self.assertIn("dir", warns[0])
+
+    def test_reassign_after_action_clears(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    dir = smell(CH_RED)
+    move(RANDOM)
+    dir = sense(FOOD)
+    if dir != 0 { become s }
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 0)
+
+    def test_action_in_if_branch_warns_after(self):
+        src = HEADER + """\
+init { become s }
+state s {
+    dir = sense(FOOD)
+    if dx == 0 {
+        move(RANDOM)
+    }
+    if dir != 0 { become s }
+    become s
+}
+"""
+        warns = stale_warnings(lint_src(src))
+        self.assertEqual(len(warns), 1)
+        self.assertIn("dir", warns[0])
+
+
+class TestForagerNoStaleWarnings(unittest.TestCase):
+    def test_forager_no_stale_reads(self):
+        """The forager example should not produce stale-read warnings."""
+        from pathlib import Path
+        forager = Path(__file__).resolve().parent.parent / "examples" / "forager.sw"
+        if not forager.exists():
+            self.skipTest("forager.sw not found")
+        src = forager.read_text()
+        prog = Parser(tokenize(src)).parse_program()
+        prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=forager.parent)
+        warns = stale_warnings(check(prog))
+        self.assertEqual(len(warns), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

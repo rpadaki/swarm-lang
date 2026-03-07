@@ -22,6 +22,13 @@ contexts:
           pop: true
 
   top_level:
+    - match: \b(package)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: entity.name.namespace.swarm
+          pop: true
+
     - match: \b(import)\b
       scope: keyword.control.import.swarm
       push:
@@ -29,9 +36,18 @@ contexts:
           scope: string.quoted.double.swarm
           pop: true
 
+    - match: \b(using)\b
+      scope: keyword.control.import.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: entity.name.namespace.swarm
+          pop: true
+
     - match: \b(export)\b
       scope: keyword.control.export.swarm
       push:
+        - match: \b(action)\b
+          scope: keyword.declaration.swarm
         - match: \b(func)\b
           scope: keyword.declaration.swarm
           set:
@@ -50,8 +66,20 @@ contexts:
             - match: ->
               scope: keyword.operator.arrow.swarm
               push:
+                - match: \b(volatile)\b
+                  scope: keyword.other.swarm
+                - match: \b(stable)\b
+                  scope: keyword.other.swarm
                 - match: \b([A-Za-z_]\w*)\b
                   scope: entity.name.type.swarm
+                - match: \(
+                  scope: punctuation.section.parens.begin.swarm
+                  push:
+                    - match: \)
+                      scope: punctuation.section.parens.end.swarm
+                      pop: true
+                    - include: expressions
+                - match: (?=\{|\n)
                   pop: true
             - match: (?=\{)
               pop: true
@@ -79,9 +107,25 @@ contexts:
         - match: (?=\n|//)
           pop: true
 
+    - match: \b(extern)\b
+      scope: keyword.declaration.swarm
+
     - match: \b(register)\b
       scope: keyword.declaration.swarm
       push:
+        - match: \(
+          scope: punctuation.section.parens.begin.swarm
+          set:
+            - match: \b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\b
+              scope: variable.other.swarm
+            - match: ','
+              scope: punctuation.separator.swarm
+            - match: '='
+              scope: keyword.operator.assignment.swarm
+            - include: expressions
+            - match: \)
+              scope: punctuation.section.parens.end.swarm
+              pop: true
         - match: \b([A-Za-z_]\w*)\b
           scope: variable.other.swarm
         - match: ','
@@ -133,6 +177,9 @@ contexts:
     - match: \b(init)\b
       scope: keyword.declaration.swarm
 
+    - match: \b(action)\b
+      scope: keyword.declaration.swarm
+
     - match: \b(func)\b
       scope: keyword.declaration.swarm
       push:
@@ -151,8 +198,20 @@ contexts:
         - match: ->
           scope: keyword.operator.arrow.swarm
           push:
+            - match: \b(volatile)\b
+              scope: keyword.other.swarm
+            - match: \b(stable)\b
+              scope: keyword.other.swarm
             - match: \b([A-Za-z_]\w*)\b
               scope: entity.name.type.swarm
+            - match: \(
+              scope: punctuation.section.parens.begin.swarm
+              push:
+                - match: \)
+                  scope: punctuation.section.parens.end.swarm
+                  pop: true
+                - include: expressions
+            - match: (?=\{|\n)
               pop: true
         - match: (?=\{)
           pop: true
@@ -183,6 +242,12 @@ contexts:
           pop: true
     - match: \b(break|continue)\b
       scope: keyword.control.swarm
+    - match: \b(local)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: variable.other.swarm
+          pop: true
     - match: \b(exit)\b
       scope: keyword.declaration.swarm
       push:
@@ -245,14 +310,16 @@ contexts:
       scope: keyword.operator.negation.swarm
     - match: '[=!<>]='
       scope: keyword.operator.comparison.swarm
+    - match: '[+\-*/%&|^]='
+      scope: keyword.operator.assignment.compound.swarm
+    - match: '<<|>>'
+      scope: keyword.operator.bitwise.swarm
     - match: '[<>]'
       scope: keyword.operator.comparison.swarm
     - match: '='
       scope: keyword.operator.assignment.swarm
     - match: '[+\-*/%&|^]'
       scope: keyword.operator.arithmetic.swarm
-    - match: '<<|>>'
-      scope: keyword.operator.bitwise.swarm
 
   numbers:
     - match: '-?\b\d+\b'
@@ -267,7 +334,26 @@ contexts:
           scope: punctuation.definition.string.end.swarm
           pop: true
 
+  expressions:
+    - include: comments
+    - include: numbers
+    - include: operators
+    - include: builtins
+    - include: sense_functions
+    - include: identifiers
+    - include: punctuation
+
+  qualified_names:
+    - match: \b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\b
+      captures:
+        1: entity.name.namespace.swarm
+        2: variable.other.swarm
+
   identifiers:
+    - match: \b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\b
+      captures:
+        1: entity.name.namespace.swarm
+        2: variable.other.swarm
     - match: \b([A-Za-z_]\w*)\b
       scope: variable.other.swarm
 

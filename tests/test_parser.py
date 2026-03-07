@@ -436,5 +436,92 @@ class TestRegisterBinding(unittest.TestCase):
         self.assertEqual(prog[0].bindings, {})
 
 
+class TestRegisterBlock(unittest.TestCase):
+    def test_register_block_simple(self):
+        prog = parse("register (\n    dir\n    x\n    y\n)")
+        self.assertIsInstance(prog[0], RegDecl)
+        self.assertEqual(prog[0].names, ["dir", "x", "y"])
+
+    def test_register_block_with_bindings(self):
+        prog = parse("register (\n    x(ant.dx)\n    y(ant.dy)\n    tmp\n)")
+        self.assertIsInstance(prog[0], RegDecl)
+        self.assertEqual(prog[0].names, ["x", "y", "tmp"])
+        self.assertEqual(prog[0].bindings, {"x": "ant.dx", "y": "ant.dy"})
+
+    def test_register_block_with_initializers(self):
+        prog = parse("register (\n    x = 0\n    y = 0\n    dir\n)")
+        self.assertIsInstance(prog[0], RegDecl)
+        self.assertEqual(prog[0].names, ["x", "y", "dir"])
+        self.assertEqual(prog[0].initializers["x"], "0")
+        self.assertEqual(prog[0].initializers["y"], "0")
+        self.assertNotIn("dir", prog[0].initializers)
+
+    def test_register_block_with_bindings_and_initializers(self):
+        prog = parse("register (\n    x(ant.dx) = 0\n    y(ant.dy) = 0\n    tmp\n)")
+        reg = prog[0]
+        self.assertEqual(reg.names, ["x", "y", "tmp"])
+        self.assertEqual(reg.bindings, {"x": "ant.dx", "y": "ant.dy"})
+        self.assertEqual(reg.initializers["x"], "0")
+        self.assertEqual(reg.initializers["y"], "0")
+
+    def test_register_block_with_expr_initializer(self):
+        prog = parse("register (\n    heading = id() % 4 + 1\n)")
+        reg = prog[0]
+        self.assertEqual(reg.names, ["heading"])
+        expr = reg.initializers["heading"]
+        self.assertIsInstance(expr, BinExpr)
+        self.assertEqual(expr.op, "+")
+        self.assertIsInstance(expr.left, BinExpr)
+        self.assertEqual(expr.left.op, "%")
+
+    def test_register_block_with_const_initializer(self):
+        prog = parse("const GREEN = 255\nregister (\n    mark_str = GREEN\n)")
+        reg = prog[1]
+        self.assertEqual(reg.initializers["mark_str"], "GREEN")
+
+    def test_register_block_comma_separated(self):
+        prog = parse("register (x, y = 0, z)")
+        reg = prog[0]
+        self.assertEqual(reg.names, ["x", "y", "z"])
+        self.assertEqual(reg.initializers["y"], "0")
+
+    def test_register_block_full_design(self):
+        prog = parse("""\
+register (
+    dir
+    x(ant.dx) = 0
+    y(ant.dy) = 0
+    heading(ant.last_dir) = id() % 4 + 1
+    mark_str = GREEN_START
+    next_st
+    tmp
+)
+""")
+        reg = prog[0]
+        self.assertEqual(reg.names, ["dir", "x", "y", "heading", "mark_str", "next_st", "tmp"])
+        self.assertEqual(reg.bindings, {
+            "x": "ant.dx", "y": "ant.dy", "heading": "ant.last_dir",
+        })
+        self.assertEqual(reg.initializers["x"], "0")
+        self.assertEqual(reg.initializers["y"], "0")
+        self.assertIsInstance(reg.initializers["heading"], BinExpr)
+        self.assertEqual(reg.initializers["mark_str"], "GREEN_START")
+        self.assertNotIn("dir", reg.initializers)
+        self.assertNotIn("next_st", reg.initializers)
+        self.assertNotIn("tmp", reg.initializers)
+
+    def test_register_inline_with_initializer(self):
+        prog = parse("register x = 5")
+        reg = prog[0]
+        self.assertEqual(reg.names, ["x"])
+        self.assertEqual(reg.initializers["x"], "5")
+
+    def test_register_inline_no_initializer_unchanged(self):
+        prog = parse("register a, b, c")
+        reg = prog[0]
+        self.assertEqual(reg.names, ["a", "b", "c"])
+        self.assertEqual(reg.initializers, {})
+
+
 if __name__ == "__main__":
     unittest.main()

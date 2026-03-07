@@ -309,6 +309,130 @@ state s {
         self.assertIn("last_dir", pkg_externs["ant"])
 
 
+class TestRegisterInitializers(unittest.TestCase):
+    def test_simple_initializer(self):
+        src = """\
+import "libant"
+register (
+    dir
+    x = 0
+    y = 0
+    next_st
+    last_dir
+)
+init { become s }
+state s { move(RANDOM) become s }
+"""
+        out = compile_src(src)
+        self.assertIn("main:", out)
+        lines = out.split("\n")
+        main_idx = next(i for i, l in enumerate(lines) if l.strip() == "main:")
+        init_lines = []
+        for l in lines[main_idx+1:]:
+            if l.strip().startswith("JMP "):
+                break
+            init_lines.append(l.strip())
+        self.assertIn("SET r2 0", init_lines)
+        self.assertIn("SET r3 0", init_lines)
+
+    def test_expr_initializer(self):
+        src = """\
+import "libant"
+register (
+    dir
+    heading = id() % 4 + 1
+    next_st
+    last_dir
+)
+init { become s }
+state s { move(RANDOM) become s }
+"""
+        out = compile_src(src)
+        self.assertIn("ID r2", out)
+        self.assertIn("MOD r2 4", out)
+        self.assertIn("ADD r2 1", out)
+
+    def test_const_initializer(self):
+        src = """\
+import "libant"
+const GREEN_START = 255
+register (
+    dir
+    mark_str = GREEN_START
+    next_st
+    last_dir
+)
+init { become s }
+state s { move(RANDOM) become s }
+"""
+        out = compile_src(src)
+        self.assertIn("SET r2 255", out)
+
+    def test_initializers_before_init_body(self):
+        src = """\
+import "libant"
+register (
+    dir
+    x = 42
+    next_st
+    last_dir
+)
+init { become s }
+state s { move(RANDOM) become s }
+"""
+        out = compile_src(src)
+        lines = out.split("\n")
+        main_idx = next(i for i, l in enumerate(lines) if l.strip() == "main:")
+        set_idx = next(i for i, l in enumerate(lines) if "SET r2 42" in l)
+        jmp_idx = next(i for i, l in enumerate(lines) if "JMP s" in l)
+        self.assertGreater(set_idx, main_idx)
+        self.assertLess(set_idx, jmp_idx)
+
+    def test_initializers_without_init_block(self):
+        src = """\
+import "libant"
+register (
+    dir
+    x = 0
+    next_st
+    last_dir
+)
+state s { move(RANDOM) become s }
+"""
+        out = compile_src(src)
+        self.assertIn("main:", out)
+        self.assertIn("SET r2 0", out)
+
+    def test_full_design_example(self):
+        src = """\
+import "libant"
+using ant
+const GREEN_START = 255
+register (
+    dir
+    x(ant.dx) = 0
+    y(ant.dy) = 0
+    heading(ant.last_dir) = id() % 4 + 1
+    mark_str = GREEN_START
+    next_st
+    tmp
+)
+init { become search }
+state search {
+    move(RANDOM)
+    become search
+}
+"""
+        out = compile_src(src)
+        self.assertIn("main:", out)
+        self.assertIn("SET r2 0", out)
+        self.assertIn("SET r3 0", out)
+        self.assertIn("ID r4", out)
+        self.assertIn("MOD r4 4", out)
+        self.assertIn("ADD r4 1", out)
+        self.assertIn("SET r5 255", out)
+
+
 class TestDCEPass(unittest.TestCase):
     def test_dead_code_after_jmp_removed(self):
         from swarm.optimize.dce import dce

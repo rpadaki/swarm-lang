@@ -123,20 +123,26 @@ KEYWORDS = [
     "state", "behavior", "init", "func", "const", "register", "tag", "bool",
     "if", "else", "while", "loop", "match", "case", "default",
     "become", "break", "continue", "exit", "asm",
+    "import", "export", "package", "using", "extern", "action", "volatile", "stable", "local",
 ]
 
 KEYWORD_SNIPPETS = {
     "state":    ("state ${1:name} {\n\t$0\n}", "Define a new state"),
     "behavior": ("behavior ${1:name} {\n\texit ${2:done}\n\t$0\n}", "Define a reusable behavior with exits"),
-    "init":     ("init {\n\t$0\n}", "Init block — runs once at spawn"),
+    "init":     ("init {\n\tbecome ${1:state}\n}", "Init block — runs once at spawn"),
     "func":     ("func ${1:name}() {\n\t$0\n}", "Inline function (expanded at call sites)"),
     "const":    ("const ${1:NAME} = ${2:value}", "Compile-time constant"),
-    "register": ("register ${1:scratch}, ${2:dir}, ${3:dx}, ${4:dy}, ${5:next_st}, ${6:last_dir}", "Declare named registers (max 8)"),
+    "register": ("register (\n\t${1:name}(${2:binding}),\n\t$0\n)", "Declare named registers with bindings (max 8)"),
     "if":       ("if ${1:condition} {\n\t$0\n}", "Conditional branch"),
     "while":    ("while ${1:condition} {\n\t$0\n}", "While loop"),
     "loop":     ("loop {\n\t$0\n}", "Infinite loop (use break to exit)"),
     "match":    ("match ${1:expr} {\n\tcase ${2:value} {\n\t\t$0\n\t}\n\tdefault {\n\t}\n}", "Match on value"),
     "become":   ("become ${1:state}", "Instant transition (no tick consumed)"),
+    "package":  ("package ${1:name}", "Declare package name"),
+    "using":    ("using ${1:name}", "Import and use package namespace"),
+    "extern":   ("extern register ${1:name}", "Declare optional extern register (DCE'd if unbound)"),
+    "action":   ("action func ${1:name}() {\n\t$0\n}", "Action function (consumes a tick)"),
+    "local":    ("local ${1:name}", "Compiler-assigned temporary register"),
 }
 
 # ── Helpers ───────────────────────────────────────────────────────

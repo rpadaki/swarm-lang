@@ -13,6 +13,7 @@ class Const:
 class RegDecl:
     names: list[str]
     bindings: dict[str, str] = field(default_factory=dict)
+    initializers: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass
