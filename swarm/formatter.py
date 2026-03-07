@@ -72,6 +72,7 @@ def format_sw(src: str) -> str:
     result: list[str] = []
     depth = 0
     in_block_comment = False
+    in_register_paren = False
     prev_was_blank = False
     prev_top_kw: str | None = None
 
@@ -96,9 +97,19 @@ def format_sw(src: str) -> str:
 
         opens, closes = _count_braces(stripped)
 
+        # Track register (...) paren blocks
+        if re.match(r'register\s*\(', stripped) and ')' not in stripped:
+            in_register_paren = True
+            opens += 1
+        elif in_register_paren and stripped.startswith(')'):
+            in_register_paren = False
+            closes += 1
+
         leading_closes = 0
         for ch in stripped:
             if ch == '}':
+                leading_closes += 1
+            elif ch == ')' and not in_register_paren:
                 leading_closes += 1
             elif ch not in ' \t':
                 break
