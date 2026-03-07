@@ -13,7 +13,6 @@ BINOP = {"+":"ADD","-":"SUB","*":"MUL","/":"DIV","%":"MOD",
 COND_JMP = {"==":"JEQ","!=":"JNE",">":"JGT","<":"JLT"}
 INV_JMP  = {"JEQ":"JNE","JNE":"JEQ","JGT":"JLT","JLT":"JGT"}
 
-LIB_DIR = Path(__file__).resolve().parent.parent / "lib"
 
 
 def resolve_imports(prog, source_dir: Path | None = None):
@@ -22,49 +21,101 @@ def resolve_imports(prog, source_dir: Path | None = None):
     resolved = []
     for node in prog:
         if isinstance(node, Import):
-            mod_path = _find_module(node.path, source_dir)
-            if not mod_path:
-                raise SyntaxError(f"line {node.line}: module not found: '{node.path}'")
-            mod_prog = Parser(tokenize(mod_path.read_text())).parse_program()
-            pkg_name = None
-            for m in mod_prog:
-                if isinstance(m, PackageDecl):
-                    pkg_name = m.name
-            exports = []
-            externs: set[str] = set()
-            for m in mod_prog:
-                if isinstance(m, ExportFunc):
-                    exports.append(m)
-                elif isinstance(m, ExportConst):
-                    exports.append(m)
-                elif isinstance(m, ExternRegDecl):
-                    externs.update(m.names)
+            pkg_name, exports, externs = _load_package(node.path, source_dir, node.line)
             if pkg_name:
                 packages[pkg_name] = exports
                 if externs:
                     pkg_externs[pkg_name] = externs
-            for m in exports:
+            else:
+                for m in exports:
+                    if isinstance(m, ExportFunc):
+                        resolved.append(m)
+                    elif isinstance(m, ExportConst):
+                        resolved.append(Const(m.name, m.value))
+        elif isinstance(node, UsingDecl):
+            resolved.append(node)
+            for m in packages.get(node.name, []):
                 if isinstance(m, ExportFunc):
                     resolved.append(m)
                 elif isinstance(m, ExportConst):
                     resolved.append(Const(m.name, m.value))
-        elif isinstance(node, UsingDecl):
-            resolved.append(node)
         else:
             resolved.append(node)
     return resolved, packages, pkg_externs
 
 
-def _find_module(name: str, source_dir: Path | None) -> Path | None:
-    candidates = []
+def _load_package(name: str, source_dir: Path | None, line: int):
+    """Load a package directory or single file. Returns (pkg_name, exports, externs)."""
+    pkg_dir = _find_package_dir(name, source_dir)
+    if pkg_dir:
+        return _load_package_dir(pkg_dir)
+    # Fallback: single file (legacy)
+    mod_path = _find_module_file(name, source_dir)
+    if mod_path:
+        return _load_single_file(mod_path)
+    raise SyntaxError(f"line {line}: package not found: '{name}'")
+
+
+def _find_package_dir(name: str, source_dir: Path | None) -> Path | None:
     if source_dir:
-        candidates.append(source_dir / f"{name}.sw")
-    candidates.append(LIB_DIR / f"{name}.sw")
-    candidates.append(LIB_DIR / f"lib{name}.sw")
-    for p in candidates:
-        if p.exists():
+        p = (source_dir / name).resolve()
+        if p.is_dir():
             return p
     return None
+
+
+def _find_module_file(name: str, source_dir: Path | None) -> Path | None:
+    if source_dir:
+        p = (source_dir / f"{name}.sw").resolve()
+        if p.is_file():
+            return p
+    return None
+
+
+def _find_module(name: str, source_dir: Path | None) -> Path | None:
+    """Find a package directory or single file. Used by LSP."""
+    d = _find_package_dir(name, source_dir)
+    if d:
+        return d
+    return _find_module_file(name, source_dir)
+
+
+def _load_single_file(path: Path):
+    """Load exports from a single .sw file."""
+    mod_prog = Parser(tokenize(path.read_text())).parse_program()
+    pkg_name = None
+    exports = []
+    externs: set[str] = set()
+    for m in mod_prog:
+        if isinstance(m, PackageDecl):
+            pkg_name = m.name
+        elif isinstance(m, ExportFunc):
+            exports.append(m)
+        elif isinstance(m, ExportConst):
+            exports.append(m)
+        elif isinstance(m, ExternRegDecl):
+            externs.update(m.names)
+    return pkg_name, exports, externs
+
+
+def _load_package_dir(pkg_dir: Path):
+    """Load all .sw files in a package directory."""
+    pkg_name = None
+    exports = []
+    externs: set[str] = set()
+    for sw_file in sorted(pkg_dir.glob("*.sw")):
+        mod_prog = Parser(tokenize(sw_file.read_text())).parse_program()
+        for m in mod_prog:
+            if isinstance(m, PackageDecl):
+                if pkg_name is None:
+                    pkg_name = m.name
+            elif isinstance(m, ExportFunc):
+                exports.append(m)
+            elif isinstance(m, ExportConst):
+                exports.append(m)
+            elif isinstance(m, ExternRegDecl):
+                externs.update(m.names)
+    return pkg_name, exports, externs
 
 
 class Compiler:
@@ -115,11 +166,6 @@ class Compiler:
     def L(self, h="L"):  self.lcnt += 1; return f"__{h}_{self.lcnt}"
     def emit(self, s):    self.out.append(s)
     def emit_lbl(self, s): self.out.append(f"{s}:")
-
-    def ns(self):
-        for n in ("next_st", "next_state", "next"):
-            if n in self.regs: return self.regs[n]
-        return "r5"
 
     def R(self, name):
         if name in self.bools:
@@ -234,18 +280,8 @@ class Compiler:
                 self.emit(f"  TAG {self.tags[sb.name]}")
             for s in sb.body: self._stmt(s)
 
-        if self.states: self._post_move()
         self.out = dce(self.out)
         return "\n".join(self.out)
-
-    def _post_move(self):
-        ns = self.ns()
-        self.emit_lbl("__post_move")
-        for i, name in enumerate(self.states):
-            if i < len(self.states) - 1:
-                self.emit(f"  JEQ {ns} {i} {name}")
-            else:
-                self.emit(f"  JMP {name}")
 
     def _stmt(self, s):
         if   isinstance(s, RegDecl):    self._regdecl(s)

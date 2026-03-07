@@ -358,11 +358,8 @@ def check(prog):
     read_regs, written_regs = _collect_register_usage(all_stmts, func_defs)
     used_regs = read_regs | written_regs
 
-    # Registers used implicitly by the compiler's state dispatch mechanism
-    implicit = {"next_st", "next_state", "next"}
-
     for rname in reg_names:
-        if rname not in used_regs and rname not in implicit:
+        if rname not in used_regs:
             warnings.append(f"unused register: '{rname}'")
 
     # Undeclared identifiers

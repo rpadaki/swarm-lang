@@ -54,16 +54,18 @@ export action func move(direction) { ... }
 
 ### Importing
 
-User programs import libraries by name. The compiler searches for `<name>.sw` and
-`lib<name>.sw` in the source directory and the `lib/` directory:
+User programs import packages by relative path. Packages are directories
+containing `.sw` files:
 
 ```
-import "libant"
+import "../lib/ant"
 ```
 
-This makes the package's exports available via qualified references (`ant.move()`,
-`ant.N`). The package name comes from the `package` declaration inside the library
-file, not from the import path.
+This loads all `.sw` files in the `ant/` directory and makes the package's exports
+available via qualified references (`ant.move()`, `ant.N`). The package name comes
+from the `package` declaration inside the library files, not from the import path.
+
+Entry point programs declare `package main`.
 
 ### Using
 
@@ -122,11 +124,8 @@ register dir, mark_str, dx, dy, next_st, last_dir, tmp
 Register initializers are compiled into the program entry point, before the `init`
 block body.
 
-### Special register names
-
-The names `next_st`, `next_state`, or `next` are recognized by the compiler for
-state dispatch after actions. One of these should be declared if the program has
-multiple states.
+State dispatch is handled internally by the compiler. There is no need to declare
+a register for it.
 
 ## Extern Registers
 
@@ -578,21 +577,28 @@ The standard library's `move()` function includes conditional updates to `dx`/`d
 based on `last_dir`. If the user binds these extern registers, coordinate tracking
 is active. If not, the tracking code is eliminated by DCE.
 
-### State Dispatch (`__post_move`)
-
-The compiler generates a `__post_move` label with a jump table that dispatches to
-the correct state based on the `next_st` register. This is used internally after
-actions.
-
 ### Heatmap Tags
 
 States are automatically assigned heatmap tag indices (up to 8). The compiler
 emits `.tag` directives and `TAG` instructions at state entry.
 
-## Standard Library (`lib/libant.sw`)
+## Standard Library (`lib/ant/`)
 
 The standard library (`package ant`) provides all built-in operations. Import it
-with `import "libant"`.
+with `import "../lib/ant"`. The library is split across multiple files in the
+`lib/ant/` directory: `constants.sw`, `sensing.sw`, and `actions.sw`.
+
+### Docstrings
+
+Comments immediately above an `export func` or `export const` serve as
+documentation (Go-style). These are shown in hover tooltips by the LSP:
+
+```
+// Returns direction (N=1, E=2, S=3, W=4) to nearest cell of type, or 0.
+export func sense(target) -> volatile result stable(target == WALL || target == NEST) {
+    asm { SENSE target result }
+}
+```
 
 ### Constants
 
@@ -731,19 +737,21 @@ and `--strip` to remove comments.
 ## Complete Example
 
 ```
-import "libant"
+package main
+
+import "../lib/ant"
+using ant
 
 const RED_START = 200
 const RED_DECAY = 3
 const GREEN_START = 255
 
 register (
-    dir
-    mark_str = GREEN_START
-    x(ant.dx) = 0
-    y(ant.dy) = 0
-    next_st
-    heading(ant.last_dir) = id() % 4 + 1
+    dir,
+    mark_str = GREEN_START,
+    x(ant.dx) = 0,
+    y(ant.dy) = 0,
+    heading(ant.last_dir) = id() % 4 + 1,
     tmp
 )
 

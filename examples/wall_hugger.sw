@@ -1,125 +1,86 @@
-// wall_hugger.sw -- Ant that follows walls to explore mazes.
-//
-// Demonstrates: while loops, probe() in multiple directions,
-// systematic direction rotation, and wall-following navigation.
-//
-// Strategy: always keep a wall to the right. At each step the ant
-// tries to turn right first; if blocked, go straight; if that is
-// also blocked, turn left; as a last resort, reverse. This traces
-// the boundary of every reachable wall and systematically covers
-// maze corridors.
+// wall_hugger.sw — Right-hand wall following for maze exploration.
+package main
 
-register scratch, dir, mark_str, dx, dy, next_st, last_dir, tmp
+import "../lib/ant"
+using ant
+
+register (
+    dir,
+    dx(ant.dx),
+    dy(ant.dy),
+    heading(ant.last_dir) = id() % 4 + 1,
+    next_st
+)
 
 func turn_right() {
-    // Rotate direction clockwise: N->E->S->W->N  (1->2->3->4->1)
-    dir = last_dir % 4
-    dir = dir + 1
+    dir = heading % 4 + 1
 }
 
 func turn_left() {
-    // Rotate direction counter-clockwise: N->W->S->E->N  (1->4->3->2->1)
-    dir = last_dir + 2
-    dir = dir % 4
-    dir = dir + 1
+    dir = (heading + 2) % 4 + 1
 }
 
 init {
-    dx = 0
-    dy = 0
-    last_dir = id()
-    last_dir = last_dir % 4
-    last_dir = last_dir + 1
     become explore
 }
 
 state explore {
-    if carrying() != 0 { become return_home }
-    if probe(HERE) == FOOD { become try_pickup }
+    if carrying() { become return_home }
+    if probe(HERE) == FOOD {
+        pickup()
+        become return_home
+    }
 
-    // Right-hand wall following:
-    // 1. Try turning right
+    // Right-hand rule
     turn_right()
-    scratch = probe(dir)
-    if scratch != WALL {
+    if probe(dir) != WALL {
         move(dir)
         become explore
     }
-
-    // 2. Try going straight
-    scratch = probe(last_dir)
-    if scratch != WALL {
-        move(last_dir)
+    if probe(heading) != WALL {
+        move(heading)
         become explore
     }
-
-    // 3. Try turning left
     turn_left()
-    scratch = probe(dir)
-    if scratch != WALL {
+    if probe(dir) != WALL {
         move(dir)
         become explore
     }
 
-    // 4. Reverse (dead end)
-    dir = last_dir + 1
-    dir = dir % 4
-    dir = dir + 1
-    scratch = probe(dir)
-    if scratch != WALL {
-        move(dir)
-        become explore
-    }
-
-    // Completely boxed in
-    move(RANDOM)
-    become explore
-}
-
-state try_pickup {
-    pickup()
-    become check_carry
-}
-
-state check_carry {
-    if carrying() != 0 { become return_home }
+    // Dead end: reverse
+    dir = (heading + 1) % 4 + 1
+    move(dir)
     become explore
 }
 
 state return_home {
     mark(CH_RED, 100)
 
-    scratch = sense(NEST)
-    if scratch != 0 {
-        move(scratch)
+    if dir := sense(NEST) {
+        move(dir)
         become do_drop
     }
 
-    // Beeline home using coordinates
     if dx > 0 {
-        scratch = probe(W)
-        if scratch != WALL {
+        if probe(W) != WALL {
             move(W)
             become return_home
         }
     }
     if dx < 0 {
-        scratch = probe(E)
-        if scratch != WALL {
+        if probe(E) != WALL {
             move(E)
             become return_home
         }
     }
     if dy > 0 {
-        scratch = probe(N)
-        if scratch != WALL {
+        if probe(N) != WALL {
             move(N)
             become return_home
         }
     }
     if dy < 0 {
-        scratch = probe(S)
-        if scratch != WALL {
+        if probe(S) != WALL {
             move(S)
             become return_home
         }

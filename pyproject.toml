@@ -14,5 +14,3 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["swarm"]
 
-[project.scripts]
-swarm-lsp = "swarm.lsp:main"

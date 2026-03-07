@@ -73,7 +73,6 @@ class CallExpr:
 class ActionStmt:
     func: str
     args: list[str] = field(default_factory=list)
-    transition: str | None = None
     line: int = 0
 
 

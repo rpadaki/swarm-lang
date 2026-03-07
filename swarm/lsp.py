@@ -1,8 +1,8 @@
 """
 Swarm Language LSP server.
 
-Provides diagnostics, completions, formatting, and hover for .sw files.
-Wraps the existing compiler, linter, and formatter.
+Provides diagnostics, completions, formatting, hover, semantic tokens,
+document symbols, and go-to-definition for .sw files.
 
 Usage:
     uv run python -m swarm lsp          # start LSP on stdio
@@ -17,107 +17,16 @@ from pygls.lsp.server import LanguageServer
 
 from .tokenizer import tokenize
 from .parser import Parser
-from .compiler import Compiler, resolve_imports, _find_module
+from .compiler import Compiler, resolve_imports, _find_module, _load_package
 from .ast import (
     StateBlock, StateFromBehavior, BehaviorDef, InitBlock, FuncDef, Const,
-    RegDecl, TagDecl, BoolDecl, Import, ExportFunc, ExportConst,
+    RegDecl, TagDecl, BoolDecl, Import, ExportFunc, ExportConst, UsingDecl,
+    PackageDecl,
 )
 from .linter import check
 from .formatter import format_sw
 
 server = LanguageServer("swarm-lsp", "v0.1.0")
-
-# ── Built-in documentation ────────────────────────────────────────
-# NOTE: These dicts are documentation-only — they provide hover docs and
-# completions in the LSP.  The compiler does NOT use them; all ant-specific
-# knowledge comes from libant via export func / export const.
-
-BUILTIN_FUNCS = {
-    "sense": {
-        "sig": "sense(type) → direction (1-4) or 0",
-        "doc": "Returns direction (N=1, E=2, S=3, W=4) to nearest cell of `type`, or 0 if none visible.\n\n**Arguments:** `FOOD` or `NEST`\n\n```swarm\nscratch = sense(FOOD)\nif scratch != 0 {\n    move(scratch)\n    become try_pickup\n}\n```",
-        "insert": "sense(${1|FOOD,NEST|})",
-    },
-    "probe": {
-        "sig": "probe(direction) → cell_type",
-        "doc": "Returns cell type at `direction`: `EMPTY` (0), `WALL` (1), `FOOD` (2), `NEST` (3).\n\n**Arguments:** `N`, `E`, `S`, `W`, `HERE`, or a register\n\n```swarm\nscratch = probe(E)\nif scratch != WALL {\n    move(E)\n    become search\n}\n```",
-        "insert": "probe(${1|HERE,N,E,S,W|})",
-    },
-    "smell": {
-        "sig": "smell(channel) → direction (1-4) or 0",
-        "doc": "Returns direction of strongest pheromone on `channel`, or 0 if none detected.\n\n**Arguments:** `CH_RED`, `CH_BLUE`, `CH_GREEN`, `CH_YELLOW`\n\n```swarm\nscratch = smell(CH_RED)\nif scratch != 0 {\n    move(scratch)\n    become follow_trail\n}\n```",
-        "insert": "smell(${1|CH_RED,CH_GREEN,CH_BLUE,CH_YELLOW|})",
-    },
-    "sniff": {
-        "sig": "sniff(channel, direction) → intensity (0-255)",
-        "doc": "Returns pheromone intensity on `channel` at `direction`.\n\n**Arguments:**\n- channel: `CH_RED`, `CH_BLUE`, `CH_GREEN`, `CH_YELLOW`\n- direction: `N`, `E`, `S`, `W`, `HERE`, or register\n\n```swarm\nscratch = sniff(CH_RED, N)\nif scratch > 100 { ... }\n```",
-        "insert": "sniff(${1|CH_RED,CH_GREEN,CH_BLUE,CH_YELLOW|}, ${2|HERE,N,E,S,W|})",
-    },
-    "carrying": {
-        "sig": "carrying() → 0 | 1",
-        "doc": "Returns 1 if the ant is carrying food, 0 otherwise.\n\n```swarm\nif carrying() != 0 { become return_home }\n```",
-        "insert": "carrying()",
-    },
-    "id": {
-        "sig": "id() → 0..199",
-        "doc": "Returns the ant's unique ID (0-199). All 200 ants run the same program.\n\nUseful for role assignment:\n```swarm\nscratch = id()\nscratch = scratch % 4  // split into 4 groups\n```",
-        "insert": "id()",
-    },
-    "rand": {
-        "sig": "rand(max) or rand(lo, hi) → integer",
-        "doc": "`rand(max)`: random integer in [0, max).\n`rand(lo, hi)`: random integer in [lo, hi).\n\n```swarm\ndir = rand(4)      // 0..3\ndir = dir + 1      // 1..4 (valid direction)\n\ndir = rand(1, 5)   // 1..4 directly\n```",
-        "insert": "rand(${1:4})",
-    },
-}
-
-BUILTIN_ACTIONS = {
-    "move": {
-        "sig": "move(direction)",
-        "doc": "Move in `direction`. **Consumes a tick.** Auto-sets `last_dir`.\n\n**Directions:** `N`/`NORTH` (1), `E`/`EAST` (2), `S`/`SOUTH` (3), `W`/`WEST` (4), `RANDOM`, `HERE`, or register.\n\n```swarm\nmove(N)\nbecome search\n```",
-        "insert": "move(${1|N,E,S,W,RANDOM,HERE,last_dir|})",
-    },
-    "pickup": {
-        "sig": "pickup()",
-        "doc": "Pick up food at current cell. **Consumes a tick.**\n\n```swarm\npickup()\nbecome check_carry\n```",
-        "insert": "pickup()",
-    },
-    "drop": {
-        "sig": "drop()",
-        "doc": "Drop carried food at current cell. **Consumes a tick.**\n\n```swarm\ndrop()\nbecome reset_coords\n```",
-        "insert": "drop()",
-    },
-    "mark": {
-        "sig": "mark(channel, intensity)",
-        "doc": "Add pheromone. Additive (capped at 255). **Does NOT consume a tick.**\n\n**Channels:** `CH_RED`, `CH_BLUE`, `CH_GREEN`, `CH_YELLOW`\n**Intensity:** 0-255 (literal or register)\n\n```swarm\nmark(CH_GREEN, 50)\nmark(CH_RED, mark_str)  // register value\n```",
-        "insert": "mark(${1|CH_RED,CH_GREEN,CH_BLUE,CH_YELLOW|}, ${2:intensity})",
-    },
-    "set_tag": {
-        "sig": "set_tag(tag)",
-        "doc": "Override heatmap tag mid-state. **Does NOT consume a tick.**\nUseful for visual debugging of sub-states.\n\n```swarm\nset_tag(stuck)\n```",
-        "insert": "set_tag(${1:tag})",
-    },
-}
-
-BUILTIN_CONSTANTS = {
-    "N":          ("Direction North (1)", "direction"),
-    "NORTH":      ("Direction North (1)", "direction"),
-    "E":          ("Direction East (2)", "direction"),
-    "EAST":       ("Direction East (2)", "direction"),
-    "S":          ("Direction South (3)", "direction"),
-    "SOUTH":      ("Direction South (3)", "direction"),
-    "W":          ("Direction West (4)", "direction"),
-    "WEST":       ("Direction West (4)", "direction"),
-    "HERE":       ("Current cell (direction 0)", "direction"),
-    "RANDOM":     ("Random direction", "direction"),
-    "EMPTY":      ("Cell type: empty (0)", "cell_type"),
-    "WALL":       ("Cell type: wall (1)", "cell_type"),
-    "FOOD":       ("Cell type: food (2) — also sense target", "cell_type"),
-    "NEST":       ("Cell type: nest (3) — also sense target", "cell_type"),
-    "CH_RED":     ("Pheromone channel: red", "channel"),
-    "CH_BLUE":    ("Pheromone channel: blue", "channel"),
-    "CH_GREEN":   ("Pheromone channel: green", "channel"),
-    "CH_YELLOW":  ("Pheromone channel: yellow", "channel"),
-}
 
 KEYWORDS = [
     "state", "behavior", "init", "func", "const", "register", "tag", "bool",
@@ -144,6 +53,18 @@ KEYWORD_SNIPPETS = {
     "action":   ("action func ${1:name}() {\n\t$0\n}", "Action function (consumes a tick)"),
     "local":    ("local ${1:name}", "Compiler-assigned temporary register"),
 }
+
+# ── Semantic Token Types ──────────────────────────────────────────
+
+SEMANTIC_TOKEN_TYPES = [
+    "namespace",    # 0 — package names
+    "type",         # 1 — state / behavior names
+    "variable",     # 2 — registers, bools
+    "function",     # 3 — func / efunc names
+    "enumMember",   # 4 — constants, tags
+    "property",     # 5 — qualified member (ant.move)
+]
+SEMANTIC_TOKEN_MODIFIERS = ["declaration", "definition"]
 
 # ── Helpers ───────────────────────────────────────────────────────
 
@@ -177,31 +98,28 @@ def _lint_source(src: str, source_dir: Path | None = None):
 
 
 def _find_warning_location(src: str, warning: str) -> tuple[int, int | None, int | None]:
-    """Find source line and optional column range for a linter warning.
-
-    Returns (line, start_col, end_col). start_col/end_col are None for whole-line.
-    """
-    # "unused register: 'name'" → find exact name in register declaration
     m = re.match(r"unused register: '(\w+)'", warning)
     if m:
         name = m.group(1)
+        in_reg = False
         for i, line in enumerate(src.split("\n")):
             if re.search(rf'\bregister\b', line):
+                in_reg = True
+            if in_reg or re.search(rf'\bregister\b', line):
                 nm = re.search(rf'\b{re.escape(name)}\b', line)
                 if nm:
                     return (i, nm.start(), nm.end())
-    # "undeclared identifier: 'name'" → find first usage in code
+            if in_reg and line.strip() == ')':
+                in_reg = False
     m = re.match(r"undeclared identifier: '(\w+)'", warning)
     if m:
         name = m.group(1)
         for i, line in enumerate(src.split("\n")):
-            # Skip declarations
             if re.match(r'\s*(register|const|tag|bool|state|behavior|func|import|export)\b', line):
                 continue
             nm = re.search(rf'\b{re.escape(name)}\b', line)
             if nm:
                 return (i, nm.start(), nm.end())
-    # "unreachable state: 'name'" → find the state definition
     m = re.match(r"unreachable state: '(\w+)'", warning)
     if m:
         name = m.group(1)
@@ -209,7 +127,6 @@ def _find_warning_location(src: str, warning: str) -> tuple[int, int | None, int
             sm = re.search(rf'\bstate\s+({re.escape(name)})\b', line)
             if sm:
                 return (i, sm.start(1), sm.end(1))
-    # "state 'name': unwired exits" → find the state
     m = re.match(r"state '(\w+)':", warning)
     if m:
         name = m.group(1)
@@ -229,16 +146,20 @@ def _collect_symbols(src: str, source_dir: Path | None = None):
     symbols = {
         "states": [], "behaviors": {}, "registers": [],
         "consts": {}, "funcs": [], "efuncs": {}, "tags": [], "bools": [],
-        "imports": [],
+        "imports": [], "packages": [], "using": set(),
+        "import_paths": {},  # pkg_name -> resolved Path
     }
     try:
         prog = Parser(tokenize(src)).parse_program()
     except Exception:
         return symbols
 
+    using_names = set()
     for node in prog:
         if isinstance(node, Import):
             symbols["imports"].append(node.path)
+        if isinstance(node, UsingDecl):
+            using_names.add(node.name)
         if isinstance(node, (StateBlock, StateFromBehavior)):
             symbols["states"].append(node.name)
         if isinstance(node, BehaviorDef):
@@ -257,20 +178,35 @@ def _collect_symbols(src: str, source_dir: Path | None = None):
             symbols["tags"].append(node.name)
         if isinstance(node, BoolDecl):
             symbols["bools"].extend(node.names)
+    symbols["using"] = using_names
 
-    # Resolve imports for symbol collection
+    # Resolve imports
+    pkg_names = set()
     for imp in symbols["imports"]:
-        mod_path = _find_module(imp, source_dir)
-        if mod_path:
-            try:
-                mod_prog = Parser(tokenize(mod_path.read_text())).parse_program()
-                for m in mod_prog:
+        try:
+            pkg_name, exports, _externs = _load_package(imp, source_dir, 0)
+            if pkg_name:
+                pkg_names.add(pkg_name)
+                resolved = _find_module(imp, source_dir)
+                if resolved:
+                    symbols["import_paths"][pkg_name] = resolved
+            # Only bring exports into unqualified scope if `using` is declared
+            if pkg_name and pkg_name in using_names:
+                for m in exports:
                     if isinstance(m, ExportFunc):
                         symbols["efuncs"][m.name] = m
                     elif isinstance(m, ExportConst):
                         symbols["consts"][m.name] = m.value
-            except Exception:
-                pass
+            elif not pkg_name:
+                # Legacy: no package name, always bring in
+                for m in exports:
+                    if isinstance(m, ExportFunc):
+                        symbols["efuncs"][m.name] = m
+                    elif isinstance(m, ExportConst):
+                        symbols["consts"][m.name] = m.value
+        except Exception:
+            pass
+    symbols["packages"] = list(pkg_names)
 
     return symbols
 
@@ -282,8 +218,61 @@ def _word_at(line: str, col: int) -> str | None:
     return None
 
 
+def _get_docstring(src: str, name: str) -> str | None:
+    lines = src.split("\n")
+    for i, line in enumerate(lines):
+        if re.search(rf'\b(func|const)\s+{re.escape(name)}\b', line) or \
+           re.search(rf'\bexport\s+(?:action\s+)?(?:func|const)\s+{re.escape(name)}\b', line):
+            doc_lines = []
+            j = i - 1
+            while j >= 0 and lines[j].strip().startswith("//"):
+                doc_lines.append(lines[j].strip().lstrip("/").strip())
+                j -= 1
+            if doc_lines:
+                doc_lines.reverse()
+                return "\n".join(doc_lines)
+            return None
+    return None
+
+
+def _find_const_docstring(name: str, local_src: str, symbols: dict, sd: Path | None) -> str | None:
+    doc = _get_docstring(local_src, name)
+    if doc:
+        return doc
+    for imp in symbols.get("imports", []):
+        try:
+            resolved = _find_module(imp, sd)
+            if not resolved:
+                continue
+            sw_files = sorted(resolved.glob("*.sw")) if resolved.is_dir() else [resolved]
+            for sw_file in sw_files:
+                doc = _get_docstring(sw_file.read_text(), name)
+                if doc:
+                    return doc
+        except Exception:
+            pass
+    return None
+
+
+def _find_efunc_docstring(name: str, symbols: dict, sd: Path | None) -> str | None:
+    # Check local source first
+    # Then check imported package files
+    for imp in symbols.get("imports", []):
+        try:
+            resolved = _find_module(imp, sd)
+            if not resolved:
+                continue
+            sw_files = sorted(resolved.glob("*.sw")) if resolved.is_dir() else [resolved]
+            for sw_file in sw_files:
+                doc = _get_docstring(sw_file.read_text(), name)
+                if doc:
+                    return doc
+        except Exception:
+            pass
+    return None
+
+
 def _find_definition(src: str, word: str) -> tuple[int, int] | None:
-    """Find the line and column of a declaration for `word`."""
     esc = re.escape(word)
     patterns = [
         rf'\bstate\s+({esc})\s*[{{=]',
@@ -293,20 +282,71 @@ def _find_definition(src: str, word: str) -> tuple[int, int] | None:
         rf'\btag\s+(?:\d+\s+)?({esc})\b',
         rf'\bexit\s+({esc})\b',
         rf'\bexport\s+func\s+({esc})\s*\(',
+        rf'\bexport\s+(?:action\s+)?func\s+({esc})\s*\(',
         rf'\bexport\s+const\s+({esc})\s*=',
     ]
-    reg_pat = re.compile(rf'\bregister\s+(.*)', re.MULTILINE)
-    for i, line in enumerate(src.split("\n")):
-        for pat in patterns:
-            m = re.search(pat, line)
-            if m:
-                return (i, m.start(1))
-        m = reg_pat.search(line)
+    # Extern register: extern register dx, dy, last_dir
+    extern_pat = re.compile(rf'\bextern\s+register\s+(.*)')
+    for i, line_text in enumerate(src.split("\n")):
+        m = extern_pat.search(line_text)
         if m:
             for rm in re.finditer(r'[A-Za-z_]\w*', m.group(1)):
                 if rm.group() == word:
                     return (i, m.start(1) + rm.start())
+    lines = src.split("\n")
+    reg_paren_depth = 0
+    for i, line in enumerate(lines):
+        for pat in patterns:
+            m = re.search(pat, line)
+            if m:
+                return (i, m.start(1))
+        # Inline register: register dir, next_st
+        inline = re.match(r'\s*register\s+(\w[\w\s,]*)', line)
+        if inline and '(' not in line.split('register', 1)[1].split('//')[0]:
+            for rm in re.finditer(r'[A-Za-z_]\w*', inline.group(1)):
+                if rm.group() == word:
+                    return (i, inline.start(1) + rm.start())
+        # Register block: track paren depth
+        if re.match(r'\s*register\s*\(', line):
+            reg_paren_depth = line.count('(') - line.count(')')
+            continue
+        if reg_paren_depth > 0:
+            entry = re.match(r'\s*([A-Za-z_]\w*)', line)
+            if entry and entry.group(1) == word:
+                return (i, entry.start(1))
+            reg_paren_depth += line.count('(') - line.count(')')
     return None
+
+
+def _compute_comment_string_ranges(src: str) -> list[tuple[int, int, int, int]]:
+    """Return list of (start_line, start_col, end_line, end_col) for comments and strings."""
+    ranges = []
+    lines = src.split("\n")
+    for pat in [r'//[^\n]*', r'/\*[\s\S]*?\*/', r'"[^"]*"']:
+        for m in re.finditer(pat, src):
+            start = m.start()
+            end = m.end()
+            sl = src[:start].count("\n")
+            sc = start - src[:start].rfind("\n") - 1
+            el = src[:end].count("\n")
+            ec = end - src[:end].rfind("\n") - 1
+            ranges.append((sl, sc, el, ec))
+    return ranges
+
+
+def _in_comment_or_string(line: int, col: int, ranges) -> bool:
+    for sl, sc, el, ec in ranges:
+        if sl == el:
+            if line == sl and sc <= col < ec:
+                return True
+        else:
+            if line == sl and col >= sc:
+                return True
+            if sl < line < el:
+                return True
+            if line == el and col < ec:
+                return True
+    return False
 
 
 # ── LSP Handlers ──────────────────────────────────────────────────
@@ -378,134 +418,335 @@ def _validate(uri: str, src: str):
     ))
 
 
-@server.feature(lsp.TEXT_DOCUMENT_COMPLETION, lsp.CompletionOptions(trigger_characters=["(", " "]))
+# ── Semantic Tokens ──────────────────────────────────────────────
+
+@server.feature(
+    lsp.TEXT_DOCUMENT_SEMANTIC_TOKENS_FULL,
+    lsp.SemanticTokensRegistrationOptions(
+        legend=lsp.SemanticTokensLegend(
+            token_types=SEMANTIC_TOKEN_TYPES,
+            token_modifiers=SEMANTIC_TOKEN_MODIFIERS,
+        ),
+        full=True,
+    ),
+)
+def semantic_tokens(params: lsp.SemanticTokensParams):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    sd = _source_dir(params.text_document.uri)
+    symbols = _collect_symbols(doc.source, sd)
+
+    # Build lookup for unqualified names
+    lookup = {}
+    for name in symbols["packages"]:
+        lookup[name] = 0  # namespace
+    for name in symbols["states"]:
+        lookup[name] = 1  # type
+    for name, beh in symbols["behaviors"].items():
+        lookup[name] = 1  # type
+    for name in symbols["registers"]:
+        lookup[name] = 2  # variable
+    for name in symbols["bools"]:
+        lookup[name] = 2  # variable
+    for name in symbols["funcs"]:
+        lookup[name] = 3  # function
+    for name in symbols["efuncs"]:
+        lookup[name] = 3  # function
+    for name in symbols["consts"]:
+        lookup[name] = 4  # enumMember
+    for name in symbols["tags"]:
+        lookup[name] = 4  # enumMember
+
+    # Build lookup for qualified members (ant.HERE, ant.move)
+    # These apply regardless of `using` — qualified access always works
+    qual_member_lookup = {}
+    for imp in symbols["imports"]:
+        try:
+            pkg_name, exports, externs = _load_package(imp, sd, 0)
+            if pkg_name:
+                for m in exports:
+                    if isinstance(m, ExportFunc):
+                        qual_member_lookup[m.name] = 3  # function
+                    elif isinstance(m, ExportConst):
+                        qual_member_lookup[m.name] = 4  # enumMember
+                if externs:
+                    for name in externs:
+                        qual_member_lookup[name] = 2  # variable (extern register)
+        except Exception:
+            pass
+
+    skip = set(KEYWORDS) | {"asm"}
+    cs_ranges = _compute_comment_string_ranges(doc.source)
+
+    data = []
+    lines = doc.source.split("\n")
+    prev_line = 0
+    prev_char = 0
+
+    def _emit(line_idx, col, length, token_type):
+        nonlocal prev_line, prev_char
+        delta_line = line_idx - prev_line
+        delta_char = col if delta_line > 0 else col - prev_char
+        data.extend([delta_line, delta_char, length, token_type, 0])
+        prev_line = line_idx
+        prev_char = col
+
+    for line_idx, line in enumerate(lines):
+        # Match qualified names (pkg.member) and plain identifiers
+        for m in re.finditer(r'([A-Za-z_]\w*)\.([A-Za-z_]\w*)|([A-Za-z_]\w*)', line):
+            col = m.start()
+            if _in_comment_or_string(line_idx, col, cs_ranges):
+                continue
+
+            if m.group(1) and m.group(2):
+                # Qualified: pkg.member
+                pkg = m.group(1)
+                member = m.group(2)
+                if pkg in skip:
+                    continue
+                # Tag the package part as namespace
+                if pkg in lookup:
+                    _emit(line_idx, m.start(1), len(pkg), lookup[pkg])
+                # Tag the member part based on what it is in the package
+                if member in qual_member_lookup:
+                    _emit(line_idx, m.start(2), len(member), qual_member_lookup[member])
+            else:
+                # Plain identifier
+                word = m.group(3)
+                if word in skip:
+                    continue
+                if word not in lookup:
+                    continue
+                _emit(line_idx, col, len(word), lookup[word])
+
+    return lsp.SemanticTokens(data=data)
+
+
+# ── Contextual Completions ───────────────────────────────────────
+
+@server.feature(lsp.TEXT_DOCUMENT_COMPLETION, lsp.CompletionOptions(trigger_characters=["(", " ", "."]))
 def completions(params: lsp.CompletionParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
     sd = _source_dir(params.text_document.uri)
     symbols = _collect_symbols(doc.source, sd)
+
+    lines = doc.source.split("\n")
+    line_idx = params.position.line
+    col = params.position.character
+    line = lines[line_idx] if line_idx < len(lines) else ""
+    prefix = line[:col].lstrip()
+
+    # After "become " → only state names
+    if re.match(r'.*\bbecome\s+\w*$', prefix):
+        return lsp.CompletionList(is_incomplete=False, items=[
+            lsp.CompletionItem(label=name, kind=lsp.CompletionItemKind.Class, detail="state")
+            for name in symbols["states"]
+        ])
+
+    # After "if " or "while " → condition context: registers, bools, consts, sensing funcs
+    if re.match(r'.*\b(if|while)\s+\w*$', prefix):
+        items = []
+        for name in symbols["registers"]:
+            items.append(lsp.CompletionItem(
+                label=name, kind=lsp.CompletionItemKind.Variable, detail="register"))
+        for name in symbols["bools"]:
+            items.append(lsp.CompletionItem(
+                label=name, kind=lsp.CompletionItemKind.Variable, detail="bool"))
+        for name, value in symbols["consts"].items():
+            items.append(lsp.CompletionItem(
+                label=name, kind=lsp.CompletionItemKind.Constant, detail=f"const = {value}"))
+        for name, ef in symbols["efuncs"].items():
+            if not ef.is_action:
+                params_str = ", ".join(ef.params)
+                if ef.params:
+                    placeholders = ", ".join(f"${{{i+1}:{p}}}" for i, p in enumerate(ef.params))
+                    insert = f"{name}({placeholders})"
+                else:
+                    insert = f"{name}()"
+                items.append(lsp.CompletionItem(
+                    label=name, kind=lsp.CompletionItemKind.Function,
+                    detail=f"{name}({params_str})",
+                    insert_text=insert,
+                    insert_text_format=lsp.InsertTextFormat.Snippet,
+                ))
+        return lsp.CompletionList(is_incomplete=False, items=items)
+
+    # After "using " → only package names
+    if re.match(r'.*\busing\s+\w*$', prefix):
+        return lsp.CompletionList(is_incomplete=False, items=[
+            lsp.CompletionItem(label=name, kind=lsp.CompletionItemKind.Module, detail="package")
+            for name in symbols["packages"]
+        ])
+
+    # After "import " → suggest available library packages (directories)
+    if re.match(r'.*\bimport\s+"?[^"]*$', prefix):
+        items = []
+        lib_dir = Path(__file__).resolve().parent.parent / "lib"
+        if lib_dir.is_dir():
+            # Find relative path from source to lib
+            rel = ""
+            if sd:
+                try:
+                    rel = str(Path("..") / lib_dir.relative_to(sd.parent)) + "/"
+                except ValueError:
+                    rel = "../lib/"
+            for p in sorted(lib_dir.iterdir()):
+                if p.is_dir() and not p.name.startswith("."):
+                    items.append(lsp.CompletionItem(
+                        label=f'"{rel}{p.name}"', kind=lsp.CompletionItemKind.Module,
+                        detail=f"package directory",
+                        insert_text=f'"{rel}{p.name}"',
+                    ))
+        return lsp.CompletionList(is_incomplete=False, items=items)
+
+    # After "package.": qualified member access
+    dot_match = re.search(r'\b(\w+)\.\w*$', prefix)
+    if dot_match:
+        pkg = dot_match.group(1)
+        items = []
+        # Load exports for this specific package
+        for imp in symbols["imports"]:
+            try:
+                pkg_name, exports, externs = _load_package(imp, sd, 0)
+                if pkg_name != pkg:
+                    continue
+                for m in exports:
+                    if isinstance(m, ExportFunc):
+                        params_str = ", ".join(m.params)
+                        ret_str = f" -> {m.ret}" if m.ret else ""
+                        sig = f"{m.name}({params_str}){ret_str}"
+                        if m.params:
+                            placeholders = ", ".join(f"${{{i+1}:{p}}}" for i, p in enumerate(m.params))
+                            insert = f"{m.name}({placeholders})"
+                        else:
+                            insert = f"{m.name}()"
+                        action_prefix = "action " if m.is_action else ""
+                        items.append(lsp.CompletionItem(
+                            label=m.name, kind=lsp.CompletionItemKind.Function,
+                            detail=f"{action_prefix}{sig}",
+                            insert_text=insert,
+                            insert_text_format=lsp.InsertTextFormat.Snippet,
+                        ))
+                    elif isinstance(m, ExportConst):
+                        items.append(lsp.CompletionItem(
+                            label=m.name, kind=lsp.CompletionItemKind.Constant,
+                            detail=f"const = {m.value}",
+                        ))
+                if externs:
+                    for name in sorted(externs):
+                        items.append(lsp.CompletionItem(
+                            label=name, kind=lsp.CompletionItemKind.Variable,
+                            detail="extern register",
+                        ))
+            except Exception:
+                pass
+        return lsp.CompletionList(is_incomplete=False, items=items)
+
+    # Determine if we're at top level or inside a block
+    depth = 0
+    for l in lines[:line_idx]:
+        depth += l.count("{") - l.count("}")
+    depth += line[:col].count("{") - line[:col].count("}")
+
     items = []
 
-    # Keywords with snippets
-    for kw in KEYWORDS:
-        if kw in KEYWORD_SNIPPETS:
-            snippet, detail = KEYWORD_SNIPPETS[kw]
+    if depth == 0:
+        # Top level: structural keywords
+        top_kws = ["state", "behavior", "init", "func", "const", "register",
+                    "tag", "bool", "import", "export", "package", "using", "extern"]
+        for kw in top_kws:
+            if kw in KEYWORD_SNIPPETS:
+                snippet, detail = KEYWORD_SNIPPETS[kw]
+                items.append(lsp.CompletionItem(
+                    label=kw, kind=lsp.CompletionItemKind.Keyword,
+                    detail=detail,
+                    insert_text=snippet,
+                    insert_text_format=lsp.InsertTextFormat.Snippet,
+                ))
+            else:
+                items.append(lsp.CompletionItem(
+                    label=kw, kind=lsp.CompletionItemKind.Keyword,
+                ))
+    else:
+        # Inside a block: statement-level keywords
+        stmt_kws = ["if", "else", "while", "loop", "match", "become",
+                     "break", "continue", "local"]
+        for kw in stmt_kws:
+            if kw in KEYWORD_SNIPPETS:
+                snippet, detail = KEYWORD_SNIPPETS[kw]
+                items.append(lsp.CompletionItem(
+                    label=kw, kind=lsp.CompletionItemKind.Keyword,
+                    detail=detail,
+                    insert_text=snippet,
+                    insert_text_format=lsp.InsertTextFormat.Snippet,
+                ))
+            else:
+                items.append(lsp.CompletionItem(
+                    label=kw, kind=lsp.CompletionItemKind.Keyword,
+                ))
+
+        # Registers
+        for name in symbols["registers"]:
             items.append(lsp.CompletionItem(
-                label=kw, kind=lsp.CompletionItemKind.Keyword,
-                detail=detail,
-                insert_text=snippet,
+                label=name, kind=lsp.CompletionItemKind.Variable,
+                detail="register",
+            ))
+
+        # Bools
+        for name in symbols["bools"]:
+            items.append(lsp.CompletionItem(
+                label=name, kind=lsp.CompletionItemKind.Variable,
+                detail="bool",
+            ))
+
+        # Constants (user + imported)
+        for name, value in symbols["consts"].items():
+            items.append(lsp.CompletionItem(
+                label=name, kind=lsp.CompletionItemKind.Constant,
+                detail=f"const = {value}",
+            ))
+
+        # Functions (user + imported)
+        for name in symbols["funcs"]:
+            items.append(lsp.CompletionItem(
+                label=name, kind=lsp.CompletionItemKind.Function,
+                detail="func (inline)",
+                insert_text=f"{name}()",
+            ))
+        for name, ef in symbols["efuncs"].items():
+            params_str = ", ".join(ef.params)
+            ret_str = f" -> {ef.ret}" if ef.ret else ""
+            sig = f"{name}({params_str}){ret_str}"
+            action_prefix = "action " if ef.is_action else ""
+            if ef.params:
+                placeholders = ", ".join(f"${{{i+1}:{p}}}" for i, p in enumerate(ef.params))
+                insert = f"{name}({placeholders})"
+            else:
+                insert = f"{name}()"
+            items.append(lsp.CompletionItem(
+                label=name, kind=lsp.CompletionItemKind.Function,
+                detail=f"{action_prefix}{sig}",
+                insert_text=insert,
                 insert_text_format=lsp.InsertTextFormat.Snippet,
             ))
-        else:
+
+        # State names (for become targets)
+        for name in symbols["states"]:
             items.append(lsp.CompletionItem(
-                label=kw, kind=lsp.CompletionItemKind.Keyword,
+                label=name, kind=lsp.CompletionItemKind.Class,
+                detail="state",
             ))
 
-    # Sense functions
-    for name, info in BUILTIN_FUNCS.items():
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Function,
-            detail=info["sig"],
-            documentation=lsp.MarkupContent(kind=lsp.MarkupKind.Markdown, value=info["doc"]),
-            insert_text=info["insert"],
-            insert_text_format=lsp.InsertTextFormat.Snippet,
-        ))
-
-    # Actions
-    for name, info in BUILTIN_ACTIONS.items():
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Function,
-            detail=info["sig"],
-            documentation=lsp.MarkupContent(kind=lsp.MarkupKind.Markdown, value=info["doc"]),
-            insert_text=info["insert"],
-            insert_text_format=lsp.InsertTextFormat.Snippet,
-        ))
-
-    # Constants
-    for name, (doc, category) in BUILTIN_CONSTANTS.items():
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Constant,
-            detail=category, documentation=doc,
-        ))
-
-    # User-declared states
-    for name in symbols["states"]:
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Class,
-            detail="state",
-        ))
-
-    # User-declared behaviors
-    for name, beh in symbols["behaviors"].items():
-        params_str = f"({', '.join(beh.params)})" if beh.params else ""
-        exits = ", ".join(beh.exits)
-        doc_str = f"Exits: {exits}" if exits else ""
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Class,
-            detail=f"behavior{params_str}",
-            documentation=doc_str,
-        ))
-
-    # User-declared registers
-    for name in symbols["registers"]:
-        special = ""
-        if name == "dx":       special = " — horizontal displacement from nest"
-        elif name == "dy":     special = " — vertical displacement from nest"
-        elif name == "last_dir": special = " — last move direction (auto-set)"
-        elif name in ("next_st", "next_state", "next"): special = " — state dispatch index (auto-set)"
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Variable,
-            detail=f"register{special}",
-        ))
-
-    # User-declared constants
-    for name, value in symbols["consts"].items():
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Constant,
-            detail=f"const = {value}",
-        ))
-
-    # User-declared funcs
-    for name in symbols["funcs"]:
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Function,
-            detail="func (inline)",
-            insert_text=f"{name}()",
-            insert_text_format=lsp.InsertTextFormat.PlainText,
-        ))
-
-    # Imported / exported functions
-    for name, ef in symbols["efuncs"].items():
-        params_str = ", ".join(ef.params)
-        ret_str = f" -> {ef.ret}" if ef.ret else ""
-        sig = f"{name}({params_str}){ret_str}"
-        if ef.params:
-            placeholders = ", ".join(f"${{{i+1}:{p}}}" for i, p in enumerate(ef.params))
-            insert = f"{name}({placeholders})"
-        else:
-            insert = f"{name}()"
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Function,
-            detail=sig,
-            insert_text=insert,
-            insert_text_format=lsp.InsertTextFormat.Snippet,
-        ))
-
-    # Bools
-    for name in symbols["bools"]:
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.Variable,
-            detail="bool (bit-packed flag)",
-        ))
-
-    # Tags
-    for name in symbols["tags"]:
-        items.append(lsp.CompletionItem(
-            label=name, kind=lsp.CompletionItemKind.EnumMember,
-            detail="tag",
-        ))
+        # Tags
+        for name in symbols["tags"]:
+            items.append(lsp.CompletionItem(
+                label=name, kind=lsp.CompletionItemKind.EnumMember,
+                detail="tag",
+            ))
 
     return lsp.CompletionList(is_incomplete=False, items=items)
 
+
+# ── Hover ────────────────────────────────────────────────────────
 
 @server.feature(lsp.TEXT_DOCUMENT_HOVER)
 def hover(params: lsp.HoverParams):
@@ -514,47 +755,76 @@ def hover(params: lsp.HoverParams):
     if params.position.line >= len(lines):
         return None
     line = lines[params.position.line]
-    word = _word_at(line, params.position.character)
-    if not word:
-        return None
-
-    if word in BUILTIN_FUNCS:
-        info = BUILTIN_FUNCS[word]
-        return lsp.Hover(contents=lsp.MarkupContent(
-            kind=lsp.MarkupKind.Markdown,
-            value=f"```\n{info['sig']}\n```\n{info['doc']}",
-        ))
-
-    if word in BUILTIN_ACTIONS:
-        info = BUILTIN_ACTIONS[word]
-        return lsp.Hover(contents=lsp.MarkupContent(
-            kind=lsp.MarkupKind.Markdown,
-            value=f"```\n{info['sig']}\n```\n{info['doc']}",
-        ))
-
-    if word in BUILTIN_CONSTANTS:
-        doc_str, category = BUILTIN_CONSTANTS[word]
-        return lsp.Hover(contents=lsp.MarkupContent(
-            kind=lsp.MarkupKind.Markdown,
-            value=f"**{word}** ({category}) — {doc_str}",
-        ))
+    col = params.position.character
 
     sd = _source_dir(params.text_document.uri)
     symbols = _collect_symbols(doc.source, sd)
+
+    # Qualified name hover: pkg.member
+    qual_match = re.search(r'(\w+)\.(\w+)', line)
+    if qual_match and qual_match.start() <= col <= qual_match.end():
+        member = qual_match.group(2)
+        if member in symbols["efuncs"]:
+            ef = symbols["efuncs"][member]
+        else:
+            # Load from package even without `using`
+            pkg = qual_match.group(1)
+            ef = None
+            for imp in symbols["imports"]:
+                try:
+                    pkg_name, exports, _ = _load_package(imp, sd, 0)
+                    if pkg_name == pkg:
+                        for m in exports:
+                            if isinstance(m, ExportFunc) and m.name == member:
+                                ef = m
+                            elif isinstance(m, ExportConst) and m.name == member:
+                                return lsp.Hover(contents=lsp.MarkupContent(
+                                    kind=lsp.MarkupKind.Markdown,
+                                    value=f"```swarm\nconst {member} = {m.value}\n```",
+                                ))
+                except Exception:
+                    pass
+        if ef:
+            params_str = ", ".join(ef.params)
+            action_str = "action " if ef.is_action else ""
+            volatile_str = "volatile " if ef.is_volatile else ""
+            sig = f"```swarm\nexport {action_str}func {member}({params_str}) -> {volatile_str}{ef.ret or '()'}\n```"
+            docstr = _find_efunc_docstring(member, symbols, sd)
+            if docstr:
+                sig += f"\n\n{docstr}"
+            return lsp.Hover(contents=lsp.MarkupContent(
+                kind=lsp.MarkupKind.Markdown,
+                value=sig,
+            ))
+
+    word = _word_at(line, col)
+    if not word:
+        return None
 
     if word in symbols["efuncs"]:
         ef = symbols["efuncs"][word]
         params_str = ", ".join(ef.params)
         ret_str = f" -> {ef.ret}" if ef.ret else ""
+        action_str = "action " if ef.is_action else ""
+        volatile_str = "volatile " if ef.is_volatile else ""
+        sig = f"```swarm\nexport {action_str}func {word}({params_str}) -> {volatile_str}{ef.ret or '()'}\n```"
+        # Look for docstring in package sources
+        doc = _find_efunc_docstring(word, symbols, sd)
+        if doc:
+            sig += f"\n\n{doc}"
         return lsp.Hover(contents=lsp.MarkupContent(
             kind=lsp.MarkupKind.Markdown,
-            value=f"```swarm\nexport func {word}({params_str}){ret_str}\n```\n*from libant*",
+            value=sig,
         ))
 
     if word in symbols["consts"]:
+        sig = f"```swarm\nconst {word} = {symbols['consts'][word]}\n```"
+        docstr = _find_const_docstring(word, doc.source, symbols, sd)
+        if docstr:
+            sig += f"\n\n{docstr}"
         return lsp.Hover(contents=lsp.MarkupContent(
             kind=lsp.MarkupKind.Markdown,
-            value=f"```swarm\nconst {word} = {symbols['consts'][word]}\n```",
+            value=sig,
         ))
 
     if word in symbols["behaviors"]:
@@ -574,14 +844,9 @@ def hover(params: lsp.HoverParams):
 
     if word in symbols["registers"]:
         idx = symbols["registers"].index(word) + 1
-        special = ""
-        if word == "dx":       special = "\n\nHorizontal displacement from nest (auto-updated after move)"
-        elif word == "dy":     special = "\n\nVertical displacement from nest (auto-updated after move)"
-        elif word == "last_dir": special = "\n\nLast move direction (auto-set by `move()`)"
-        elif word in ("next_st", "next_state", "next"): special = "\n\nState dispatch index (legacy, no longer auto-set)"
         return lsp.Hover(contents=lsp.MarkupContent(
             kind=lsp.MarkupKind.Markdown,
-            value=f"**register** `{word}` → `r{idx}`{special}",
+            value=f"**register** `{word}` → `r{idx}`",
         ))
 
     if word in symbols["bools"]:
@@ -590,8 +855,44 @@ def hover(params: lsp.HoverParams):
             value=f"**bool** `{word}` — bit-packed flag (0 or 1)",
         ))
 
+    KEYWORD_DOCS = {
+        "become": "Instant state transition — does not consume a tick.",
+        "state": "Named block of logic. Each tick executes one state.",
+        "behavior": "Reusable state template with exit points for wiring.",
+        "init": "Runs once when the ant spawns. Must `become` a state.",
+        "func": "Inline function — expanded at every call site.",
+        "register": "Named storage slot (max 8). Maps to r1–r8 at compile time.",
+        "const": "Compile-time constant — replaced with its value everywhere.",
+        "tag": "Heatmap visualization tag (0–15).",
+        "bool": "Bit-packed boolean flag (0 or 1), stored in r8.",
+        "if": "Conditional branch. Condition can use `:=` (walrus) to bind + test.",
+        "while": "Loop while condition is true.",
+        "loop": "Infinite loop — use `break` to exit.",
+        "match": "Match expression against `case` values.",
+        "break": "Exit the innermost `while` or `loop`.",
+        "continue": "Skip to next iteration of the innermost loop.",
+        "import": "Load a package by relative path. Use `using` to access exports.",
+        "using": "Bring a package's exports into unqualified scope.",
+        "package": "Declare this file's package name.",
+        "export": "Make a `func` or `const` visible to importers.",
+        "extern": "Declare an optional register — removed if not bound by importer.",
+        "action": "Marks a function as tick-consuming (move/pickup/drop).",
+        "local": "Compiler-assigned temporary register.",
+        "exit": "Declare an exit point in a behavior.",
+        "move": "Move in a direction. Consumes a tick.",
+        "pickup": "Pick up food at current cell. Consumes a tick.",
+        "drop": "Drop carried food at current cell. Consumes a tick.",
+    }
+    if word in KEYWORD_DOCS:
+        return lsp.Hover(contents=lsp.MarkupContent(
+            kind=lsp.MarkupKind.Markdown,
+            value=f"**{word}** — {KEYWORD_DOCS[word]}",
+        ))
+
     return None
 
+
+# ── Go to Definition ─────────────────────────────────────────────
 
 @server.feature(lsp.TEXT_DOCUMENT_DEFINITION)
 def definition(params: lsp.DefinitionParams):
@@ -599,39 +900,277 @@ def definition(params: lsp.DefinitionParams):
     lines = doc.source.split("\n")
     if params.position.line >= len(lines):
         return None
-    word = _word_at(lines[params.position.line], params.position.character)
+    line = lines[params.position.line]
+    sd = _source_dir(params.text_document.uri)
+
+    # Cmd+click on import path string → open the package directory/file
+    import_match = re.match(r'\s*import\s+"([^"]+)"', line)
+    if import_match:
+        imp_path = import_match.group(1)
+        col = params.position.character
+        str_start = line.index(f'"{imp_path}"')
+        str_end = str_start + len(imp_path) + 2
+        if str_start <= col <= str_end:
+            resolved = _find_module(imp_path, sd)
+            target_uri = None
+            if resolved:
+                if resolved.is_dir():
+                    sw_files = sorted(resolved.glob("*.sw"))
+                    if sw_files:
+                        target_uri = f"file://{sw_files[0]}"
+                else:
+                    target_uri = f"file://{resolved}"
+            if target_uri:
+                origin = lsp.Range(
+                    start=lsp.Position(line=params.position.line, character=str_start),
+                    end=lsp.Position(line=params.position.line, character=str_end),
+                )
+                return lsp.LocationLink(
+                    target_uri=target_uri,
+                    target_range=lsp.Range(
+                        start=lsp.Position(line=0, character=0),
+                        end=lsp.Position(line=0, character=0),
+                    ),
+                    target_selection_range=lsp.Range(
+                        start=lsp.Position(line=0, character=0),
+                        end=lsp.Position(line=0, character=0),
+                    ),
+                    origin_selection_range=origin,
+                )
+
+    # Check for qualified name: cursor on pkg.member
+    qual_match = re.search(r'(\w+)\.(\w+)', line)
+    col = params.position.character
+    if qual_match and qual_match.start() <= col <= qual_match.end():
+        pkg = qual_match.group(1)
+        member = qual_match.group(2)
+        # Navigate to the member's definition in the package
+        symbols = _collect_symbols(doc.source, sd)
+        if pkg in symbols.get("import_paths", {}):
+            resolved = symbols["import_paths"][pkg]
+            sw_files = sorted(resolved.glob("*.sw")) if resolved.is_dir() else [resolved]
+            for sw_file in sw_files:
+                mod_src = sw_file.read_text()
+                loc = _find_definition(mod_src, member)
+                if loc:
+                    ln, c = loc
+                    return lsp.Location(
+                        uri=f"file://{sw_file}",
+                        range=lsp.Range(
+                            start=lsp.Position(line=ln, character=c),
+                            end=lsp.Position(line=ln, character=c + len(member)),
+                        ),
+                    )
+        return None
+
+    word = _word_at(line, params.position.character)
     if not word:
         return None
-    # Try local definition first
+
+    # Local definition
     loc = _find_definition(doc.source, word)
     if loc:
-        line, col = loc
+        line_num, col = loc
         return lsp.Location(
             uri=params.text_document.uri,
             range=lsp.Range(
-                start=lsp.Position(line=line, character=col),
-                end=lsp.Position(line=line, character=col + len(word)),
+                start=lsp.Position(line=line_num, character=col),
+                end=lsp.Position(line=line_num, character=col + len(word)),
             ),
         )
-    # Try imported modules
-    sd = _source_dir(params.text_document.uri)
+
+    # Search imported packages
     symbols = _collect_symbols(doc.source, sd)
     for imp in symbols["imports"]:
-        mod_path = _find_module(imp, sd)
-        if mod_path:
-            mod_src = mod_path.read_text()
+        resolved = _find_module(imp, sd)
+        if not resolved:
+            continue
+        sw_files = sorted(resolved.glob("*.sw")) if resolved.is_dir() else [resolved]
+        for sw_file in sw_files:
+            mod_src = sw_file.read_text()
             loc = _find_definition(mod_src, word)
             if loc:
-                line, col = loc
+                line_num, col = loc
                 return lsp.Location(
-                    uri=f"file://{mod_path}",
+                    uri=f"file://{sw_file}",
                     range=lsp.Range(
-                        start=lsp.Position(line=line, character=col),
-                        end=lsp.Position(line=line, character=col + len(word)),
+                        start=lsp.Position(line=line_num, character=col),
+                        end=lsp.Position(line=line_num, character=col + len(word)),
                     ),
                 )
     return None
 
+
+# ── Find References ──────────────────────────────────────────────
+
+@server.feature(lsp.TEXT_DOCUMENT_REFERENCES)
+def references(params: lsp.ReferenceParams):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    lines = doc.source.split("\n")
+    if params.position.line >= len(lines):
+        return None
+    word = _word_at(lines[params.position.line], params.position.character)
+    if not word:
+        return None
+
+    results = []
+    esc = re.escape(word)
+    pat = re.compile(rf'\b{esc}\b')
+
+    # Find in current file
+    for i, line in enumerate(lines):
+        for m in pat.finditer(line):
+            results.append(lsp.Location(
+                uri=params.text_document.uri,
+                range=lsp.Range(
+                    start=lsp.Position(line=i, character=m.start()),
+                    end=lsp.Position(line=i, character=m.end()),
+                ),
+            ))
+
+    # Find in imported package files
+    sd = _source_dir(params.text_document.uri)
+    symbols = _collect_symbols(doc.source, sd)
+    for imp in symbols["imports"]:
+        resolved = _find_module(imp, sd)
+        if not resolved:
+            continue
+        sw_files = sorted(resolved.glob("*.sw")) if resolved.is_dir() else [resolved]
+        for sw_file in sw_files:
+            mod_lines = sw_file.read_text().split("\n")
+            for i, line in enumerate(mod_lines):
+                for m in pat.finditer(line):
+                    results.append(lsp.Location(
+                        uri=f"file://{sw_file}",
+                        range=lsp.Range(
+                            start=lsp.Position(line=i, character=m.start()),
+                            end=lsp.Position(line=i, character=m.end()),
+                        ),
+                    ))
+
+    return results if results else None
+
+
+# ── Document Symbols (Outline) ───────────────────────────────────
+
+@server.feature(lsp.TEXT_DOCUMENT_DOCUMENT_SYMBOL)
+def document_symbols(params: lsp.DocumentSymbolParams):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    lines = doc.source.split("\n")
+    symbols = []
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+
+        # States
+        m = re.match(r'\bstate\s+(\w+)', stripped)
+        if m:
+            name = m.group(1)
+            end = _find_block_end(lines, i)
+            symbols.append(lsp.DocumentSymbol(
+                name=name,
+                kind=lsp.SymbolKind.Class,
+                range=_line_range(i, end),
+                selection_range=_word_range(i, line, m.start(1), name),
+                detail="state",
+            ))
+
+        # Behaviors
+        m = re.match(r'\bbehavior\s+(\w+)', stripped)
+        if m:
+            name = m.group(1)
+            end = _find_block_end(lines, i)
+            symbols.append(lsp.DocumentSymbol(
+                name=name,
+                kind=lsp.SymbolKind.Class,
+                range=_line_range(i, end),
+                selection_range=_word_range(i, line, line.index(name), name),
+                detail="behavior",
+            ))
+
+        # Init
+        if stripped.startswith("init"):
+            end = _find_block_end(lines, i)
+            symbols.append(lsp.DocumentSymbol(
+                name="init",
+                kind=lsp.SymbolKind.Constructor,
+                range=_line_range(i, end),
+                selection_range=_word_range(i, line, line.index("init"), "init"),
+            ))
+
+        # Functions
+        m = re.match(r'(?:export\s+)?(?:action\s+)?func\s+(\w+)', stripped)
+        if m:
+            name = m.group(1)
+            end = _find_block_end(lines, i)
+            symbols.append(lsp.DocumentSymbol(
+                name=name,
+                kind=lsp.SymbolKind.Function,
+                range=_line_range(i, end),
+                selection_range=_word_range(i, line, line.index(name), name),
+                detail="func",
+            ))
+
+        # Constants
+        m = re.match(r'(?:export\s+)?const\s+(\w+)\s*=\s*(.*)', stripped)
+        if m:
+            name, value = m.group(1), m.group(2).strip()
+            symbols.append(lsp.DocumentSymbol(
+                name=name,
+                kind=lsp.SymbolKind.Constant,
+                range=_line_range(i, i),
+                selection_range=_word_range(i, line, line.index(name), name),
+                detail=f"= {value}",
+            ))
+
+        # Register declarations
+        m = re.match(r'\bregister\b', stripped)
+        if m:
+            end = i
+            if "{" not in line:
+                pass
+            else:
+                end = _find_block_end(lines, i)
+            reg_text = "\n".join(lines[i:end+1])
+            for rm in re.finditer(r'(\w+)(?:\([^)]*\))?', reg_text):
+                rname = rm.group(1)
+                if rname in ("register",):
+                    continue
+                symbols.append(lsp.DocumentSymbol(
+                    name=rname,
+                    kind=lsp.SymbolKind.Variable,
+                    range=_line_range(i, end),
+                    selection_range=_word_range(i, line, 0, rname),
+                    detail="register",
+                ))
+
+    return symbols
+
+
+def _find_block_end(lines: list[str], start: int) -> int:
+    depth = 0
+    for i in range(start, len(lines)):
+        depth += lines[i].count("{") - lines[i].count("}")
+        if depth <= 0 and "{" in "".join(lines[start:i+1]):
+            return i
+    return len(lines) - 1
+
+
+def _line_range(start: int, end: int) -> lsp.Range:
+    return lsp.Range(
+        start=lsp.Position(line=start, character=0),
+        end=lsp.Position(line=end, character=1000),
+    )
+
+
+def _word_range(line: int, text: str, offset: int, word: str) -> lsp.Range:
+    return lsp.Range(
+        start=lsp.Position(line=line, character=offset),
+        end=lsp.Position(line=line, character=offset + len(word)),
+    )
+
+
+# ── Formatting ───────────────────────────────────────────────────
 
 @server.feature(lsp.TEXT_DOCUMENT_FORMATTING)
 def formatting(params: lsp.DocumentFormattingParams):

@@ -18,8 +18,7 @@ FIXTURES_DIR = PROJECT_ROOT / "tests" / "fixtures"
 
 # Files that declare 8 user registers overflow the r1-r7 limit.
 KNOWN_REGISTER_OVERFLOW = {
-    "minimal", "pheromone_trail", "match_demo", "wall_hugger",
-    "behavior_demo", "behavior_test", "param_test", "bool_test",
+    "behavior_test", "param_test", "bool_test",
 }
 
 

@@ -28,12 +28,17 @@ impl zed::Extension for SwarmExtension {
 
         let uv = worktree.which("uv").ok_or("uv not found in PATH")?;
         let root = worktree.root_path();
+        let project_dir = if root.ends_with("/swarm-lang") || root.ends_with("/swarm-lang/") {
+            root.clone()
+        } else {
+            format!("{}/swarm-lang", root)
+        };
         Ok(zed::Command {
             command: uv,
             args: vec![
                 "run".into(),
                 "--directory".into(),
-                root.clone(),
+                project_dir,
                 "python".into(),
                 "-m".into(),
                 "swarm".into(),

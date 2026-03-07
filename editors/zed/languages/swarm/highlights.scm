@@ -16,18 +16,19 @@
 ; ── Actions (tick-consuming) ──
 ["move" "pickup" "drop"] @function
 
-; ── Transition arrow ──
-"->" @operator
-
 ; ── Walrus operator ──
 ":=" @operator
+
+; ── Transition arrow (return annotations) ──
+"->" @operator
 
 ; ── Negation ──
 "!" @operator
 
-; ── Comparison and binary operators ──
+; ── Comparison, binary, and compound operators ──
 (comparison_operator) @operator
 (binary_operator) @operator
+(compound_operator) @operator
 "=" @operator
 
 ; ── Built-in constants ──
@@ -50,13 +51,6 @@
 (package_declaration name: (identifier) @type)
 (using_declaration name: (identifier) @type)
 
-; ── Compound assignment ──
-(compound_operator) @operator
-
-; ── Qualified names ──
-(qualified_name module: (identifier) @type)
-(qualified_name member: (identifier) @variable)
-
 ; ── Declarations ──
 (const_declaration name: (identifier) @constant)
 (export_const name: (identifier) @constant)
@@ -65,6 +59,16 @@
 (bool_declaration name: (identifier) @variable)
 (tag_declaration name: (identifier) @label)
 (local_declaration name: (identifier) @variable)
+
+; ── Qualified names ──
+(qualified_name module: (identifier) @type)
+(qualified_name member: (identifier) @property)
+
+; ── Register entry (more specific, overrides general qualified_name) ──
+(register_entry name: (identifier) @variable)
+(register_entry binding: (qualified_name module: (identifier) @type))
+(register_entry binding: (qualified_name member: (identifier) @variable))
+(register_entry binding: (identifier) @variable)
 
 ; ── State/behavior/function names ──
 (state_definition name: (identifier) @type)
@@ -84,9 +88,6 @@
 ; ── Wiring ──
 (wiring exit: (identifier) @label)
 (wiring target: (identifier) @type)
-
-; ── Transitions ──
-(transition target: (identifier) @type)
 
 ; ── Become targets ──
 (become_statement target: (identifier) @type)
@@ -118,3 +119,4 @@
 ["{" "}"] @punctuation.bracket
 ["(" ")"] @punctuation.bracket
 "," @punctuation.delimiter
+

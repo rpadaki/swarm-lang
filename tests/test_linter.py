@@ -8,9 +8,14 @@ from swarm.compiler import resolve_imports
 from swarm.linter import check
 
 
+from pathlib import Path
+
+LIB_PARENT = Path(__file__).resolve().parent.parent / "lib"
+
+
 def lint_src(src: str) -> list[str]:
     prog = Parser(tokenize(src)).parse_program()
-    prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=None)
+    prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=LIB_PARENT)
     return check(prog)
 
 
@@ -19,7 +24,7 @@ def stale_warnings(warnings: list[str]) -> list[str]:
 
 
 HEADER = """\
-import "libant"
+import "ant"
 using ant
 register dir, dx, dy, next_st, last_dir
 """
@@ -173,16 +178,14 @@ state s {
         self.assertIn("dir", warns[0])
 
 
-class TestForagerNoStaleWarnings(unittest.TestCase):
-    def test_forager_no_stale_reads(self):
-        """The forager example should not produce stale-read warnings."""
-        from pathlib import Path
-        forager = Path(__file__).resolve().parent.parent / "examples" / "forager.sw"
-        if not forager.exists():
-            self.skipTest("forager.sw not found")
-        src = forager.read_text()
+class TestExampleNoStaleWarnings(unittest.TestCase):
+    def test_pheromone_trail_no_stale_reads(self):
+        example = Path(__file__).resolve().parent.parent / "examples" / "pheromone_trail.sw"
+        if not example.exists():
+            self.skipTest("pheromone_trail.sw not found")
+        src = example.read_text()
         prog = Parser(tokenize(src)).parse_program()
-        prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=forager.parent)
+        prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=example.parent)
         warns = stale_warnings(check(prog))
         self.assertEqual(len(warns), 0)
 

@@ -5,17 +5,21 @@ from pathlib import Path
 
 from swarm.tokenizer import tokenize
 from swarm.parser import Parser
-from swarm.compiler import Compiler, resolve_imports, _find_module, LIB_DIR
+from swarm.compiler import Compiler, resolve_imports, _find_module
+
+# source_dir for tests: resolve imports relative to the repo's lib/ parent
+LIB_PARENT = Path(__file__).resolve().parent.parent / "lib"
 
 
 def compile_src(src: str) -> str:
     prog = Parser(tokenize(src)).parse_program()
-    prog, packages, pkg_externs = resolve_imports(prog, source_dir=None)
+    prog, packages, pkg_externs = resolve_imports(prog, source_dir=LIB_PARENT)
     return Compiler(packages, pkg_externs).compile(prog)
 
 
 MINIMAL = """\
-import "libant"
+import "ant"
+using ant
 register dir, mark_str, dx, dy, next_st, last_dir, tmp
 init {
     dx = 0
@@ -71,47 +75,38 @@ class TestRegisterAllocation(unittest.TestCase):
 
 
 class TestResolveImports(unittest.TestCase):
-    def test_find_module_libant(self):
-        p = _find_module("libant", None)
+    def test_find_module_ant_dir(self):
+        p = _find_module("ant", LIB_PARENT)
         self.assertIsNotNone(p)
-        self.assertTrue(p.exists())
-        self.assertEqual(p.name, "libant.sw")
+        self.assertTrue(p.is_dir())
 
     def test_resolve_imports_brings_in_exports(self):
-        src = 'import "libant"'
+        src = 'import "ant"\nusing ant'
         prog = Parser(tokenize(src)).parse_program()
-        resolved, _packages, _pkg_externs = resolve_imports(prog)
+        resolved, _packages, _pkg_externs = resolve_imports(prog, source_dir=LIB_PARENT)
         names = [n.name for n in resolved if hasattr(n, "name")]
         self.assertIn("sense", names)
         self.assertIn("probe", names)
         self.assertIn("move", names)
 
-    def test_find_module_ant_alias(self):
-        p = _find_module("ant", None)
-        self.assertIsNotNone(p)
-        self.assertTrue(p.exists())
-        self.assertEqual(p.name, "libant.sw")
-
-    def test_import_ant_resolves(self):
+    def test_import_ant_creates_package(self):
         src = 'import "ant"'
         prog = Parser(tokenize(src)).parse_program()
-        resolved, packages, _pkg_externs = resolve_imports(prog)
+        _resolved, packages, _pkg_externs = resolve_imports(prog, source_dir=LIB_PARENT)
         self.assertIn("ant", packages)
-        names = [n.name for n in resolved if hasattr(n, "name")]
-        self.assertIn("sense", names)
-        self.assertIn("move", names)
 
     def test_missing_module_raises(self):
         src = 'import "nonexistent_module"'
         prog = Parser(tokenize(src)).parse_program()
         with self.assertRaises(SyntaxError):
-            resolve_imports(prog)
+            resolve_imports(prog, source_dir=LIB_PARENT)
 
 
 class TestConsts(unittest.TestCase):
     def test_const_substitution(self):
         src = """\
-import "libant"
+import "ant"
+using ant
 const MY_VAL = 42
 register dir, dx, dy, next_st, last_dir
 init { dx = MY_VAL become s }
@@ -124,7 +119,8 @@ state s { move(RANDOM) become s }
 class TestConditionCodegen(unittest.TestCase):
     def test_if_become_compiles_to_jeq(self):
         src = """\
-import "libant"
+import "ant"
+using ant
 register dir, dx, dy, next_st, last_dir
 init { dx = 0 become s }
 state s {
@@ -140,7 +136,8 @@ state s {
 class TestBehaviorExpansion(unittest.TestCase):
     def test_behavior_wiring_compiles(self):
         src = """\
-import "libant"
+import "ant"
+using ant
 register scratch, dir, dx, dy, next_st, last_dir
 behavior wander {
     exit found
@@ -157,14 +154,14 @@ state explore = wander { found -> explore }
 
 class TestPackageSystem(unittest.TestCase):
     def test_import_detects_package_name(self):
-        src = 'import "libant"'
+        src = 'import "ant"'
         prog = Parser(tokenize(src)).parse_program()
-        _resolved, packages, _pkg_externs = resolve_imports(prog)
+        _resolved, packages, _pkg_externs = resolve_imports(prog, source_dir=LIB_PARENT)
         self.assertIn("ant", packages)
 
     def test_package_exports_available_qualified(self):
         src = """\
-import "libant"
+import "ant"
 register dir, dx, dy, next_st, last_dir
 init { dx = 0 become s }
 state s {
@@ -179,7 +176,7 @@ state s {
 
     def test_using_brings_names_into_scope(self):
         src = """\
-import "libant"
+import "ant"
 using ant
 register dir, dx, dy, next_st, last_dir
 init { dx = 0 become s }
@@ -192,9 +189,9 @@ state s {
         self.assertIn("MOVE", out)
 
     def test_action_func_is_action_flag(self):
-        src = 'import "libant"'
+        src = 'import "ant"'
         prog = Parser(tokenize(src)).parse_program()
-        _resolved, packages, _pkg_externs = resolve_imports(prog)
+        _resolved, packages, _pkg_externs = resolve_imports(prog, source_dir=LIB_PARENT)
         ant_exports = packages["ant"]
         move_ef = next(e for e in ant_exports if hasattr(e, 'name') and e.name == "move")
         self.assertTrue(move_ef.is_action)
@@ -202,9 +199,9 @@ state s {
         self.assertFalse(sense_ef.is_action)
 
     def test_volatile_annotations_survive_import(self):
-        src = 'import "libant"'
+        src = 'import "ant"'
         prog = Parser(tokenize(src)).parse_program()
-        _resolved, packages, _pkg_externs = resolve_imports(prog)
+        _resolved, packages, _pkg_externs = resolve_imports(prog, source_dir=LIB_PARENT)
         ant_exports = packages["ant"]
         sense_ef = next(e for e in ant_exports if hasattr(e, 'name') and e.name == "sense")
         self.assertTrue(sense_ef.is_volatile)
@@ -219,25 +216,11 @@ state s {
         self.assertFalse(carrying_ef.is_volatile)
         self.assertIsNone(carrying_ef.stable_predicate)
 
-    def test_contains_post_move(self):
+    def test_no_post_move(self):
         out = compile_src(MINIMAL)
-        self.assertIn("__post_move:", out)
+        self.assertNotIn("__post_move:", out)
 
     def test_action_then_become(self):
-        src = """\
-import "libant"
-register dir, dx, dy, next_st, last_dir
-init { dx = 0 become s }
-state s {
-    move(RANDOM)
-    become s
-}
-"""
-        out = compile_src(src)
-        self.assertIn("MOVE", out)
-        self.assertIn("JMP s", out)
-
-    def test_import_ant_shorthand(self):
         src = """\
 import "ant"
 using ant
@@ -250,26 +233,13 @@ state s {
 """
         out = compile_src(src)
         self.assertIn("MOVE", out)
-
-    def test_import_ant_qualified(self):
-        src = """\
-import "ant"
-register dir, dx, dy, next_st, last_dir
-init { dx = 0 become s }
-state s {
-    ant.move(ant.RANDOM)
-    become s
-}
-"""
-        out = compile_src(src)
-        self.assertIn("MOVE", out)
+        self.assertIn("JMP s", out)
 
 
 class TestExternRegisterDCE(unittest.TestCase):
     def test_unbound_extern_no_crash(self):
-        """Program that imports ant but doesn't bind dx/dy should compile without errors."""
         src = """\
-import "libant"
+import "ant"
 using ant
 register dir, next_st
 init { become s }
@@ -282,9 +252,8 @@ state s {
         self.assertIn("MOVE", out)
 
     def test_bound_extern_compiles(self):
-        """Program that binds extern registers should compile normally."""
         src = """\
-import "libant"
+import "ant"
 using ant
 register dir, x(ant.dx), y(ant.dy), heading(ant.last_dir), next_st
 init { x = 0 y = 0 become s }
@@ -297,12 +266,9 @@ state s {
         self.assertIn("MOVE", out)
 
     def test_extern_registers_detected_in_packages(self):
-        """resolve_imports should detect extern register declarations."""
-        from swarm.tokenizer import tokenize
-        from swarm.parser import Parser
-        src = 'import "libant"'
+        src = 'import "ant"'
         prog = Parser(tokenize(src)).parse_program()
-        _resolved, _packages, pkg_externs = resolve_imports(prog)
+        _resolved, _packages, pkg_externs = resolve_imports(prog, source_dir=LIB_PARENT)
         self.assertIn("ant", pkg_externs)
         self.assertIn("dx", pkg_externs["ant"])
         self.assertIn("dy", pkg_externs["ant"])
@@ -312,7 +278,8 @@ state s {
 class TestRegisterInitializers(unittest.TestCase):
     def test_simple_initializer(self):
         src = """\
-import "libant"
+import "ant"
+using ant
 register (
     dir
     x = 0
@@ -337,7 +304,8 @@ state s { move(RANDOM) become s }
 
     def test_expr_initializer(self):
         src = """\
-import "libant"
+import "ant"
+using ant
 register (
     dir
     heading = id() % 4 + 1
@@ -354,7 +322,8 @@ state s { move(RANDOM) become s }
 
     def test_const_initializer(self):
         src = """\
-import "libant"
+import "ant"
+using ant
 const GREEN_START = 255
 register (
     dir
@@ -370,7 +339,8 @@ state s { move(RANDOM) become s }
 
     def test_initializers_before_init_body(self):
         src = """\
-import "libant"
+import "ant"
+using ant
 register (
     dir
     x = 42
@@ -390,7 +360,8 @@ state s { move(RANDOM) become s }
 
     def test_initializers_without_init_block(self):
         src = """\
-import "libant"
+import "ant"
+using ant
 register (
     dir
     x = 0
@@ -405,7 +376,7 @@ state s { move(RANDOM) become s }
 
     def test_full_design_example(self):
         src = """\
-import "libant"
+import "ant"
 using ant
 const GREEN_START = 255
 register (

@@ -1,40 +1,28 @@
-// minimal.sw -- Simplest possible ant program.
-//
-// Demonstrates: states, transitions (become), init block,
-// carrying() check, pickup/drop actions, and random movement.
-//
-// Strategy: wander randomly until food is underfoot, pick it up,
-//           wander randomly toward the nest, drop it, repeat.
+// minimal.sw — Simplest possible ant: random walk, grab food, return.
+package main
 
-register scratch, dir, mark_str, dx, dy, next_st, last_dir, tmp
+import "../lib/ant"
+using ant
+
+register dir, next_st
 
 init {
-    dx = 0
-    dy = 0
     become wander
 }
 
 state wander {
-    if carrying() != 0 { become go_home }
-    if probe(HERE) == FOOD { become grab }
+    if carrying() { become go_home }
+    if probe(HERE) == FOOD {
+        pickup()
+        become go_home
+    }
     move(RANDOM)
     become wander
 }
 
-state grab {
-    pickup()
-    become got_food
-}
-
-state got_food {
-    if carrying() != 0 { become go_home }
-    become wander
-}
-
 state go_home {
-    scratch = sense(NEST)
-    if scratch != 0 {
-        move(scratch)
+    if dir := sense(NEST) {
+        move(dir)
         become do_drop
     }
     move(RANDOM)
@@ -43,11 +31,5 @@ state go_home {
 
 state do_drop {
     drop()
-    become reset
-}
-
-state reset {
-    dx = 0
-    dy = 0
     become wander
 }
