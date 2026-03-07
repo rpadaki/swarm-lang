@@ -1,0 +1,20 @@
+{
+  "name": "tree-sitter-swarm",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for Swarm Language (.sw)",
+  "main": "bindings/node",
+  "keywords": [
+    "parser",
+    "tree-sitter",
+    "swarm",
+    "ant"
+  ],
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.24.0"
+  }
+}

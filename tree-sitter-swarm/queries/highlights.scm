@@ -1,4 +1,4 @@
-; Swarm Language highlight queries for Zed
+; Swarm Language highlight queries for tree-sitter
 
 ; ── Keywords ──
 [
@@ -7,20 +7,17 @@
   "become" "break" "continue" "exit"
   "const" "register" "tag" "bool"
   "import" "export"
-  "package" "using" "extern" "action" "local"
+  "package" "using" "action" "volatile" "stable" "extern" "local"
 ] @keyword
 
-; ── Annotations ──
-["volatile" "stable"] @attribute
-
 ; ── Actions (tick-consuming) ──
-["move" "pickup" "drop"] @function
+["move" "pickup" "drop"] @keyword.function
+
+; ── Transition arrow ──
+"->" @operator
 
 ; ── Walrus operator ──
 ":=" @operator
-
-; ── Transition arrow (return annotations) ──
-"->" @operator
 
 ; ── Negation ──
 "!" @operator
@@ -33,7 +30,7 @@
 "=" @operator
 
 ; ── Built-in constants ──
-(builtin) @constant
+(builtin) @constant.builtin
 
 ; ── Numbers ──
 (number) @number
@@ -48,28 +45,20 @@
 ; ── Import path ──
 (import_statement path: (string) @string)
 
-; ── Package / Using ──
-(package_declaration name: (identifier) @type)
-(using_declaration name: (identifier) @type)
-
 ; ── Declarations ──
+(package_declaration name: (identifier) @module)
+(using_declaration name: (identifier) @module)
 (const_declaration name: (identifier) @constant)
 (export_const name: (identifier) @constant)
 (register_declaration name: (identifier) @variable)
+(register_entry name: (identifier) @variable)
+(register_entry binding: (qualified_name module: (identifier) @module))
+(register_entry binding: (qualified_name member: (identifier) @variable))
+(register_entry binding: (identifier) @variable)
 (extern_register_declaration name: (identifier) @variable)
 (bool_declaration name: (identifier) @variable)
 (tag_declaration name: (identifier) @label)
 (local_declaration name: (identifier) @variable)
-
-; ── Qualified names ──
-(qualified_name module: (identifier) @type)
-(qualified_name member: (identifier) @property)
-
-; ── Register entry (more specific, overrides general qualified_name) ──
-(register_entry name: (identifier) @variable)
-(register_entry binding: (qualified_name module: (identifier) @type))
-(register_entry binding: (qualified_name member: (identifier) @variable))
-(register_entry binding: (identifier) @variable)
 
 ; ── State/behavior/function names ──
 (state_definition name: (identifier) @type)
@@ -82,6 +71,10 @@
 ; ── Function parameters and return ──
 (parameter_list (identifier) @variable.parameter)
 (return_annotation name: (identifier) @type)
+
+; ── Qualified names ──
+(qualified_name module: (identifier) @module)
+(qualified_name member: (identifier) @property)
 
 ; ── Exit declarations ──
 (exit_declaration name: (identifier) @label)
@@ -107,10 +100,10 @@
   (#match? @function.builtin "^(sense|probe|smell|sniff|carrying|id|rand|rand_range|mark|set_tag)$"))
 
 ; ── Function calls — user-defined ──
-(function_call name: (identifier) @function)
+(function_call name: (identifier) @function.call)
 (call_expression
-  name: (identifier) @function
-  (#not-match? @function "^(sense|probe|smell|sniff|carrying|id|rand|rand_range|mark|set_tag)$"))
+  name: (identifier) @function.call
+  (#not-match? @function.call "^(sense|probe|smell|sniff|carrying|id|rand|rand_range|mark|set_tag)$"))
 
 ; ── Assignment targets ──
 (assignment target: (identifier) @variable)
@@ -120,4 +113,4 @@
 ["{" "}"] @punctuation.bracket
 ["(" ")"] @punctuation.bracket
 "," @punctuation.delimiter
-
+"." @punctuation.delimiter
