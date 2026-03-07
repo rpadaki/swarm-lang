@@ -306,7 +306,7 @@ def compile_program(source_path: Path, do_analyze: bool = False,
         lines = strip_comments_and_blanks(lines)
         lines = strip_debug_symbols(lines)
 
-    print("\n".join(lines))
+    sys.stdout.write("\n".join(lines))
 
 
 def warn(msg):
