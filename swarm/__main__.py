@@ -12,11 +12,29 @@ Subcommands:
 import sys
 
 
+HELP = """\
+Usage: swarm <file.sw | subcommand> [args]
+
+Commands:
+  compile <file.sw>     Compile .sw to antssembly (default if given a .sw file)
+  check <file.sw>       Lint / check for warnings
+  fmt <file.sw>         Format (--in-place to overwrite)
+  stats <file.sw>       Print program statistics
+  lsp                   Start the LSP server
+  antssembly <file.ant> Preprocess a .ant file
+
+Compile options:
+  -o <out.ant>          Write output to file
+  --copy                Copy output to clipboard (pbcopy)
+  -O0                   Disable all optimizations
+  -s, --strip           Remove debug symbols (aliases, tags, state names)
+"""
+
+
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: swarm <file.sw | subcommand> [args]", file=sys.stderr)
-        print("Subcommands: compile, check, fmt, stats, lsp, antssembly", file=sys.stderr)
-        sys.exit(1)
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+        print(HELP, end="", file=sys.stderr)
+        sys.exit(0 if len(sys.argv) > 1 else 1)
 
     subcommand = sys.argv[1]
 
