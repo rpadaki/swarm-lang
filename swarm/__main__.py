@@ -35,7 +35,6 @@ def main():
     # antssembly
     p_asm = sub.add_parser("antssembly", help="Preprocess a .ant file")
     p_asm.add_argument("file", help=".ant file to preprocess")
-    p_asm.add_argument("--copy", action="store_true", help="Copy output to clipboard")
     p_asm.add_argument("--analyze", action="store_true", help="Analyze only")
     p_asm.add_argument("--strip", action="store_true", help="Strip comments and aliases")
 
@@ -66,7 +65,6 @@ def main():
 def _add_compile_args(p):
     p.add_argument("file", help=".sw file to compile")
     p.add_argument("-o", "--output", metavar="FILE", help="Write output to file")
-    p.add_argument("--copy", action="store_true", help="Copy output to clipboard (pbcopy)")
     p.add_argument("-O0", dest="no_opt", action="store_true", help="Disable all optimizations")
     p.add_argument("-s", "--strip", action="store_true", help="Remove debug symbols")
 
@@ -93,10 +91,6 @@ def _compile(args):
         out_file = Path(args.output)
         out_file.write_text(output + "\n")
         print(f"Wrote {out_file}", file=sys.stderr)
-    elif args.copy:
-        import subprocess
-        subprocess.run(["pbcopy"], input=output.encode(), check=True)
-        print("Copied!", file=sys.stderr)
     else:
         print(output)
 
@@ -143,8 +137,6 @@ def _stats(args):
 
 def _antssembly(args):
     sys.argv = ["antssembly", args.file]
-    if args.copy:
-        sys.argv.append("--copy")
     if args.analyze:
         sys.argv.append("--analyze")
     if args.strip:

@@ -9,9 +9,9 @@ Features:
 - Outputs flat .ant file ready to paste
 
 Usage:
-    uv run swarm antssembly programs/v3.ant --copy     # compile + pbcopy
-    uv run swarm antssembly programs/v3.ant --analyze   # analyze only
-    uv run swarm antssembly programs/v3.ant             # print to stdout
+    swarm antssembly programs/v3.ant --analyze   # analyze only
+    swarm antssembly programs/v3.ant --strip     # strip debug symbols
+    swarm antssembly programs/v3.ant             # print to stdout
 """
 
 import sys
@@ -270,27 +270,18 @@ def strip_debug_symbols(lines: list[str]) -> list[str]:
 
 
 def compile_program(source_path: Path, do_analyze: bool = False,
-                    do_copy: bool = False, do_strip: bool = False):
+                    do_strip: bool = False):
     lines = preprocess(source_path)
 
     if do_analyze:
         analyze(lines)
-        if not do_copy:
-            return
+        return
 
     if do_strip:
         lines = strip_comments_and_blanks(lines)
         lines = strip_debug_symbols(lines)
 
-    output = "\n".join(lines)
-
-    if do_copy:
-        import subprocess
-        subprocess.run(["pbcopy"], input=output.encode(), check=True)
-        line_count = len([l for l in lines if l.strip()])
-        print(f"Copied to clipboard ({line_count} non-empty lines)", file=sys.stderr)
-    else:
-        print(output)
+    print("\n".join(lines))
 
 
 def warn(msg):
@@ -299,10 +290,9 @@ def warn(msg):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: swarm antssembly <source.ant> [--analyze] [--copy] [--strip]", file=sys.stderr)
+        print("Usage: swarm antssembly <source.ant> [--analyze] [--strip]", file=sys.stderr)
         print("  --analyze  Run static analysis", file=sys.stderr)
-        print("  --copy     Copy output to clipboard (pbcopy)", file=sys.stderr)
-        print("  --strip    Remove comments and blank lines", file=sys.stderr)
+        print("  --strip    Strip comments, blanks, and debug symbols", file=sys.stderr)
         sys.exit(1)
 
     source = Path(sys.argv[1])
@@ -315,7 +305,6 @@ def main():
     compile_program(
         source,
         do_analyze="--analyze" in flags,
-        do_copy="--copy" in flags,
         do_strip="--strip" in flags,
     )
 
