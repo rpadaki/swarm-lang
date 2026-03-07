@@ -4,6 +4,13 @@
 // free and can be called any number of times within a tick.
 package ant
 
+// dx tracks the ant's horizontal displacement from its starting cell.
+// Incremented on east moves, decremented on west moves.
+// dy tracks the ant's vertical displacement from its starting cell.
+// Decremented on north moves, incremented on south moves.
+// last_dir stores the direction of the ant's most recent move (N=1..W=4).
+// All three are approximate — wall collisions are not detected.
+// Bind via register ( myname(ant.dx) ); DCE'd if unbound.
 extern register dx, dy, last_dir
 
 // move moves the ant one cell in the given direction (N/E/S/W/RANDOM).
