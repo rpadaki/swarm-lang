@@ -7,6 +7,9 @@ dependencies = [
     "lsprotocol",
 ]
 
+[project.scripts]
+swarm = "swarm.__main__:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
