@@ -6,6 +6,8 @@ _LABEL_RE = re.compile(r"^(\w+):$")
 _JMP_RE = re.compile(r"^\s+JMP\s+(\S+)")
 _JUMP_RE = re.compile(r"^\s+J\w+\s+.*\s+(\S+)$")
 _SET_RE = re.compile(r"^\s+SET\s+(\S+)\s+(\S+)$")
+_ARITH_RE = re.compile(r"^\s+(\w+)\s+(\S+)\s+(\S+)$")
+_ARITH_OPS = {"ADD", "SUB", "MUL", "DIV", "MOD", "AND", "OR", "XOR", "LSHIFT", "RSHIFT"}
 
 
 def dce(lines: list[str]) -> list[str]:
@@ -28,6 +30,7 @@ def dce(lines: list[str]) -> list[str]:
         lines = _remove_duplicate_labels(lines)
         lines = _remove_unreferenced_labels(lines)
     lines = _remove_noop_sets(lines)
+    lines = _fuse_set_op(lines)
     return lines
 
 
@@ -185,5 +188,31 @@ def _remove_noop_sets(lines: list[str]) -> list[str]:
         m = _SET_RE.match(line)
         if m and m.group(1) == m.group(2):
             continue
+        result.append(line)
+    return result
+
+
+def _fuse_set_op(lines: list[str]) -> list[str]:
+    """Fuse SET r0 <val>; OP rN r0 into OP rN <val>, removing the SET.
+
+    Only applies when the SET target is r0 (scratch register) and the
+    next instruction uses r0 as its second operand.
+    """
+    result = []
+    skip = False
+    for i, line in enumerate(lines):
+        if skip:
+            skip = False
+            continue
+        set_m = _SET_RE.match(line)
+        if set_m and set_m.group(1) == "r0" and i + 1 < len(lines):
+            val = set_m.group(2)
+            arith_m = _ARITH_RE.match(lines[i + 1])
+            if (arith_m and arith_m.group(1) in _ARITH_OPS
+                    and arith_m.group(3) == "r0" and arith_m.group(2) != "r0"):
+                op, dst = arith_m.group(1), arith_m.group(2)
+                result.append(f"  {op} {dst} {val}")
+                skip = True
+                continue
         result.append(line)
     return result

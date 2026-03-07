@@ -645,6 +645,26 @@ class TestDCEPass(unittest.TestCase):
         result = dce(lines)
         self.assertIn("a:", result)
 
+    def test_set_op_fusion(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "  SET r0 42",
+            "  ADD r1 r0",
+        ]
+        result = dce(lines)
+        self.assertNotIn("  SET r0 42", result)
+        self.assertIn("  ADD r1 42", result)
+
+    def test_set_op_fusion_skipped_when_dst_is_r0(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "  SET r0 10",
+            "  SUB r0 3",
+        ]
+        result = dce(lines)
+        self.assertIn("  SET r0 10", result)
+        self.assertIn("  SUB r0 3", result)
+
 
 if __name__ == "__main__":
     unittest.main()
