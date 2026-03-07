@@ -22,7 +22,7 @@ from .compiler import Compiler, resolve_imports
 from .ast import (
     StateBlock, StateFromBehavior, BehaviorDef, InitBlock, FuncDef, Const,
     RegDecl, TagDecl, BoolDecl, Assignment, ActionStmt, Become, IfStmt, WhileStmt,
-    LoopStmt, MatchStmt, FuncCall, RawAsm, BinExpr, CallExpr, Break, Continue,
+    LoopStmt, MatchStmt, FuncCall, BinExpr, CallExpr, Break, Continue,
     ExportFunc, ExportConst, Import, AsmBlock,
 )
 

@@ -182,6 +182,3 @@ class ExternRegDecl:
     names: list[str]
 
 
-@dataclass
-class RawAsm:
-    line: str

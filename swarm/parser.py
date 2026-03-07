@@ -324,9 +324,6 @@ class Parser:
 
     def parse_asm(self):
         self.advance()
-        if self.at("LPAREN"):
-            self.expect("LPAREN"); s = self.expect("STRING").value[1:-1]; self.expect("RPAREN")
-            return RawAsm(s)
         self.expect("LBRACE")
         tokens = []
         while not self.match("RBRACE"):

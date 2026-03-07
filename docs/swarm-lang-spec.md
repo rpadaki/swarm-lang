@@ -529,23 +529,11 @@ match probe(HERE) {
 
 ## Inline Assembly
 
-### Block form
-
-For multi-instruction sequences inside efuncs. Tokens are resolved against
-parameter bindings and register aliases:
+Tokens are resolved against parameter bindings and register aliases:
 
 ```
 asm { SENSE target result }
 asm { MOVE direction }
-```
-
-### String form
-
-Escape hatch for raw antssembly instructions:
-
-```
-asm("NOP")
-asm("HALT")
 ```
 
 ## Dead Code Elimination

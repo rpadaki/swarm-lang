@@ -362,7 +362,6 @@ class Compiler:
                 for st in self.funcs[s.name]: self._stmt(st)
             else: raise RuntimeError(f"unknown func: {s.name}")
         elif isinstance(s, AsmBlock):   self._asm_block(s.tokens, {})
-        elif isinstance(s, RawAsm):     self.emit(f"  {s.line}")
 
     def _regdecl(self, s):
         for n in s.names:
