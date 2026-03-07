@@ -199,6 +199,19 @@ def _is_action_stmt(stmt, efunc_map):
     return ef is not None and ef.is_action
 
 
+def _always_terminates(stmts):
+    """True if every execution path through stmts hits become/break/continue."""
+    for s in stmts:
+        if isinstance(s, (Become, Break, Continue)):
+            return True
+        if isinstance(s, IfStmt) and s.else_body:
+            if _always_terminates(s.body) and _always_terminates(s.else_body):
+                return True
+        if isinstance(s, LoopStmt):
+            return True
+    return False
+
+
 def _check_stale_reads_block(stmts, efunc_map, func_defs, volatile, stale):
     """Walk a block of statements, tracking volatile/stale registers.
 
@@ -241,19 +254,29 @@ def _check_stale_reads_block(stmts, efunc_map, func_defs, volatile, stale):
                 ce = _cond_call_expr(s.cond)
                 if ce and _is_volatile_call(ce, efunc_map):
                     volatile.add(tgt)
-            # Recurse into branches (snapshot state, merge conservatively)
+            # Recurse into branches, skip terminated branches in merge
             vol_snap, stale_snap = volatile.copy(), stale.copy()
             warnings.extend(_check_stale_reads_block(
                 s.body, efunc_map, func_defs, volatile, stale))
+            then_terminates = _always_terminates(s.body)
             vol_then, stale_then = volatile.copy(), stale.copy()
             volatile.clear(); volatile.update(vol_snap)
             stale.clear(); stale.update(stale_snap)
+            else_terminates = False
             if s.else_body:
                 warnings.extend(_check_stale_reads_block(
                     s.else_body, efunc_map, func_defs, volatile, stale))
-            # Merge: a register is volatile/stale if it is in either branch
-            volatile.update(vol_then)
-            stale.update(stale_then)
+                else_terminates = _always_terminates(s.else_body)
+            if then_terminates and else_terminates:
+                pass
+            elif then_terminates:
+                pass  # volatile/stale already at else (or snapshot)
+            elif else_terminates:
+                volatile.clear(); volatile.update(vol_then)
+                stale.clear(); stale.update(stale_then)
+            else:
+                volatile.update(vol_then)
+                stale.update(stale_then)
 
         elif isinstance(s, WhileStmt):
             for ref in _refs_in_cond(s.cond):
