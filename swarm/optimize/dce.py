@@ -18,11 +18,15 @@ def dce(lines: list[str]) -> list[str]:
     - Labels not targeted by any jump
     - SET instructions where source == destination
     """
-    jump_targets = _collect_jump_targets(lines)
-    lines = _remove_dead_after_jmp(lines, jump_targets)
-    lines = _remove_jmp_to_next(lines)
-    lines = _remove_duplicate_labels(lines)
-    lines = _remove_unreferenced_labels(lines)
+    prev = None
+    while lines != prev:
+        prev = lines
+        jump_targets = _collect_jump_targets(lines)
+        lines = _remove_dead_after_jmp(lines, jump_targets)
+        lines = _collapse_jmp_chains(lines)
+        lines = _remove_jmp_to_next(lines)
+        lines = _remove_duplicate_labels(lines)
+        lines = _remove_unreferenced_labels(lines)
     lines = _remove_noop_sets(lines)
     return lines
 
@@ -77,6 +81,59 @@ def _remove_duplicate_labels(lines: list[str]) -> list[str]:
             prev_label = label
         else:
             prev_label = None
+        result.append(line)
+    return result
+
+
+def _collapse_jmp_chains(lines: list[str]) -> list[str]:
+    """Rewrite jump targets that point to a label whose only instruction is JMP elsewhere."""
+    # Build label -> index map
+    label_idx: dict[str, int] = {}
+    for i, line in enumerate(lines):
+        m = _LABEL_RE.match(line)
+        if m:
+            label_idx[m.group(1)] = i
+
+    # Build label -> ultimate target map for labels that just JMP
+    redirects: dict[str, str] = {}
+    for label, idx in label_idx.items():
+        # Look at the first instruction after the label
+        for j in range(idx + 1, len(lines)):
+            nxt = lines[j].strip()
+            if not nxt:
+                continue
+            if _LABEL_RE.match(lines[j]):
+                break
+            jmp_m = _JMP_RE.match(lines[j])
+            if jmp_m:
+                redirects[label] = jmp_m.group(1)
+            break
+
+    if not redirects:
+        return lines
+
+    # Follow chains (A -> B -> C => A -> C), with cycle detection
+    def resolve(label):
+        visited = set()
+        cur = label
+        while cur in redirects and cur not in visited:
+            visited.add(cur)
+            cur = redirects[cur]
+        return cur
+
+    final: dict[str, str] = {l: resolve(l) for l in redirects}
+
+    # Rewrite all jump targets
+    result = []
+    for line in lines:
+        m = _JMP_RE.match(line)
+        if m and m.group(1) in final:
+            result.append(line.replace(m.group(1), final[m.group(1)]))
+            continue
+        m = _JUMP_RE.match(line)
+        if m and m.group(1) in final:
+            result.append(line.replace(m.group(1), final[m.group(1)]))
+            continue
         result.append(line)
     return result
 

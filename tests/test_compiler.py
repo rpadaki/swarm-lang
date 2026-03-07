@@ -618,6 +618,33 @@ class TestDCEPass(unittest.TestCase):
         self.assertIn("main:", result)
         self.assertIn("search:", result)
 
+    def test_jmp_chain_collapsed(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "  JEQ r0 2 __cs_1",
+            "  JMP end",
+            "__cs_1:",
+            "  JMP target",
+            "target:",
+            "  SET r1 0",
+            "end:",
+            "  SET r2 0",
+        ]
+        result = dce(lines)
+        self.assertIn("  JEQ r0 2 target", result)
+        self.assertNotIn("__cs_1:", result)
+
+    def test_jmp_chain_no_cycle(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "a:",
+            "  JMP b",
+            "b:",
+            "  JMP a",
+        ]
+        result = dce(lines)
+        self.assertIn("a:", result)
+
 
 if __name__ == "__main__":
     unittest.main()
