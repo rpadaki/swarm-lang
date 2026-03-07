@@ -86,7 +86,13 @@ def _compile_source(src: str, source_dir: Path | None = None):
 def _lint_source(src: str, source_dir: Path | None = None):
     try:
         prog = Parser(tokenize(src)).parse_program()
+    except Exception:
+        return []
+    try:
         prog, _packages, _pkg_externs = resolve_imports(prog, source_dir)
+    except Exception:
+        pass
+    try:
         warnings = check(prog)
         results = []
         for w in warnings:
@@ -134,6 +140,15 @@ def _find_warning_location(src: str, warning: str) -> tuple[int, int | None, int
             sm = re.search(rf'\bstate\s+({re.escape(name)})\b', line)
             if sm:
                 return (i, sm.start(1), sm.end(1))
+    m = re.match(r"stale read of '(\w+)'.* \[line (\d+)\]", warning)
+    if m:
+        name = m.group(1)
+        src_line = int(m.group(2)) - 1
+        lines = src.split("\n")
+        if 0 <= src_line < len(lines):
+            nm = re.search(rf'\b{re.escape(name)}\b', lines[src_line])
+            if nm:
+                return (src_line, nm.start(), nm.end())
     return (0, None, None)
 
 
@@ -942,22 +957,43 @@ def definition(params: lsp.DefinitionParams):
                 else:
                     target_uri = f"file://{resolved}"
             if target_uri:
-                origin = lsp.Range(
-                    start=lsp.Position(line=params.position.line, character=str_start),
-                    end=lsp.Position(line=params.position.line, character=str_end),
-                )
-                return lsp.LocationLink(
-                    target_uri=target_uri,
-                    target_range=lsp.Range(
+                return lsp.Location(
+                    uri=target_uri,
+                    range=lsp.Range(
                         start=lsp.Position(line=0, character=0),
                         end=lsp.Position(line=0, character=0),
                     ),
-                    target_selection_range=lsp.Range(
-                        start=lsp.Position(line=0, character=0),
-                        end=lsp.Position(line=0, character=0),
-                    ),
-                    origin_selection_range=origin,
                 )
+
+    # Cmd+click on `using <name>` → open the package
+    using_match = re.match(r'\s*using\s+(\w+)', line)
+    if using_match:
+        pkg_name = using_match.group(1)
+        col = params.position.character
+        name_start = using_match.start(1)
+        name_end = using_match.end(1)
+        if name_start <= col <= name_end:
+            symbols = _collect_symbols(doc.source, sd)
+            if pkg_name in symbols.get("import_paths", {}):
+                resolved = symbols["import_paths"][pkg_name]
+                if resolved.is_dir():
+                    sw_files = sorted(resolved.glob("*.sw"))
+                    if sw_files:
+                        return lsp.Location(
+                            uri=f"file://{sw_files[0]}",
+                            range=lsp.Range(
+                                start=lsp.Position(line=0, character=0),
+                                end=lsp.Position(line=0, character=0),
+                            ),
+                        )
+                else:
+                    return lsp.Location(
+                        uri=f"file://{resolved}",
+                        range=lsp.Range(
+                            start=lsp.Position(line=0, character=0),
+                            end=lsp.Position(line=0, character=0),
+                        ),
+                    )
 
     # Check for qualified name: cursor on pkg.member
     qual_match = re.search(r'(\w+)\.(\w+)', line)

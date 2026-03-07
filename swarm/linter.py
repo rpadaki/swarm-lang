@@ -212,7 +212,7 @@ def _check_stale_reads_block(stmts, efunc_map, func_defs, volatile, stale):
             # Check reads first (RHS may read stale registers)
             for ref in _refs_in_expr(s.expr):
                 if ref in stale:
-                    warnings.append(ref)
+                    warnings.append((ref, s.line))
             # Assignment clears staleness and may introduce volatility
             stale.discard(s.target)
             volatile.discard(s.target)
@@ -223,7 +223,7 @@ def _check_stale_reads_block(stmts, efunc_map, func_defs, volatile, stale):
             # Check reads in action args
             for a in s.args:
                 if isinstance(a, str) and a in stale:
-                    warnings.append(a)
+                    warnings.append((a, s.line))
             # If this is a tick-consuming action, all volatile regs become stale
             if _is_action_stmt(s, efunc_map):
                 stale.update(volatile)
@@ -232,7 +232,7 @@ def _check_stale_reads_block(stmts, efunc_map, func_defs, volatile, stale):
             # Check reads in condition
             for ref in _refs_in_cond(s.cond):
                 if ref in stale:
-                    warnings.append(ref)
+                    warnings.append((ref, s.line))
             # Condition assignment may clear/set volatility
             tgt = _cond_assigns(s.cond)
             if tgt:
@@ -258,7 +258,7 @@ def _check_stale_reads_block(stmts, efunc_map, func_defs, volatile, stale):
         elif isinstance(s, WhileStmt):
             for ref in _refs_in_cond(s.cond):
                 if ref in stale:
-                    warnings.append(ref)
+                    warnings.append((ref, s.line))
             tgt = _cond_assigns(s.cond)
             if tgt:
                 stale.discard(tgt)
@@ -275,11 +275,11 @@ def _check_stale_reads_block(stmts, efunc_map, func_defs, volatile, stale):
 
         elif isinstance(s, MatchStmt):
             if isinstance(s.var, str) and s.var in stale:
-                warnings.append(s.var)
+                warnings.append((s.var, 0))
             elif isinstance(s.var, CallExpr):
                 for a in s.var.args:
                     if isinstance(a, str) and a in stale:
-                        warnings.append(a)
+                        warnings.append((a, 0))
             vol_snap, stale_snap = volatile.copy(), stale.copy()
             for c in s.cases:
                 volatile.clear(); volatile.update(vol_snap)
@@ -323,14 +323,14 @@ def _check_stale_reads(prog, efunc_map, func_defs, behaviors):
             continue
         volatile = set()
         stale = set()
-        stale_names = _check_stale_reads_block(body, efunc_map, func_defs, volatile, stale)
+        stale_hits = _check_stale_reads_block(body, efunc_map, func_defs, volatile, stale)
         seen = set()
-        for name in stale_names:
+        for name, line in stale_hits:
             key = (getattr(node, 'name', 'init'), name)
             if key not in seen:
                 seen.add(key)
                 warnings.append(
-                    f"stale read of '{name}' after action (value may have changed)"
+                    f"stale read of '{name}' after action (value may have changed) [line {line}]"
                 )
     return warnings
 
@@ -435,7 +435,10 @@ def main():
     path = Path(sys.argv[1])
     src = path.read_text()
     prog = Parser(tokenize(src)).parse_program()
-    prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=path.parent)
+    try:
+        prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=path.parent)
+    except SyntaxError as e:
+        print(f"warning: {e}", file=sys.stderr)
     warns = check(prog)
 
     if warns:

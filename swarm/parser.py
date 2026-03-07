@@ -282,7 +282,7 @@ class Parser:
         if not t: raise SyntaxError("unexpected EOF")
         if t.type == "IDENT":
             if t.value == "if":       return self.parse_if()
-            if t.value == "while":    self.advance(); return WhileStmt(self.parse_condition(), self.parse_block())
+            if t.value == "while":    wt = self.advance(); return WhileStmt(self.parse_condition(), self.parse_block(), line=wt.line)
             if t.value == "loop":     self.advance(); return LoopStmt(self.parse_block())
             if t.value == "match":    return self.parse_match()
             if t.value == "break":    self.advance(); return Break()
@@ -332,12 +332,13 @@ class Parser:
         return AsmBlock(tokens)
 
     def parse_assignment(self):
-        n = self.advance().value
+        tok = self.advance()
+        n = tok.value
         op_tok = self.advance()
         if op_tok.value == "=":
-            return Assignment(n, self.parse_expr())
+            return Assignment(n, self.parse_expr(), line=tok.line)
         base_op = op_tok.value[0]
-        return Assignment(n, BinExpr(n, base_op, self.parse_expr()))
+        return Assignment(n, BinExpr(n, base_op, self.parse_expr()), line=tok.line)
 
     def _is_binop(self):
         t = self.peek()
@@ -391,9 +392,9 @@ class Parser:
         t = self.peek()
         if (t.type == "IDENT" and self.pos+1 < len(self.toks)
                 and self.toks[self.pos+1].type == "OP" and self.toks[self.pos+1].value == ":="):
-            name = self.advance().value; self.advance()
+            tok = self.advance(); self.advance()
             expr = self.parse_expr()
-            left = Assignment(name, expr)
+            left = Assignment(tok.value, expr, line=tok.line)
             if self.peek() and self.peek().type == "OP" and self.peek().value in ("==","!=",">","<",">=","<="):
                 return (left, self.advance().value, self._read_arg())
             return (left, "==" if negated else "!=", "0")
@@ -417,11 +418,11 @@ class Parser:
         return (left, op, right)
 
     def parse_if(self):
-        self.advance(); cond = self.parse_condition(); body = self.parse_block()
+        if_tok = self.advance(); cond = self.parse_condition(); body = self.parse_block()
         eb = None
         if self.match("IDENT", "else"):
             eb = [self.parse_if()] if self.at("IDENT", "if") else self.parse_block()
-        return IfStmt(cond, body, eb)
+        return IfStmt(cond, body, eb, line=if_tok.line)
 
     def parse_match(self):
         self.advance()

@@ -53,6 +53,7 @@ class Become:
 class Assignment:
     target: str
     expr: object
+    line: int = 0
 
 
 @dataclass
@@ -81,12 +82,14 @@ class IfStmt:
     cond: tuple
     body: list
     else_body: list | None = None
+    line: int = 0
 
 
 @dataclass
 class WhileStmt:
     cond: tuple
     body: list
+    line: int = 0
 
 
 @dataclass
