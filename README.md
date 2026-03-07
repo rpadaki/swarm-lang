@@ -1,6 +1,6 @@
 # Swarm Language
 
-A language for programming ant colony brains in the [SWARM challenge](https://dev.moment.com/swarm).
+A (vibecoded) language for programming ant colony brains in the [SWARM challenge](https://dev.moment.com/swarm).
 
 One program controls all 200 ants. Each ant runs the same brain — a state machine where each state executes until an action (move/pickup/drop) consumes the tick.
 
