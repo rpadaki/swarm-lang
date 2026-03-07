@@ -692,9 +692,12 @@ class Compiler:
             self.emit_lbl(end)
 
     def _while(self, s):
-        top, brk, body = self.L("wh"), self.L("we"), self.L("wb")
-        self.loops.append((brk, top))
-        self.emit_lbl(top)
+        cond_lbl, brk, body = self.L("wc"), self.L("we"), self.L("wb")
+        self.loops.append((brk, cond_lbl))
+        self.emit(f"  JMP {cond_lbl}")
+        self.emit_lbl(body)
+        for st in s.body: self._stmt(st)
+        self.emit_lbl(cond_lbl)
         l, op, r = self._eval_cond(s.cond)
         if op == ">=":
             self.emit(f"  JGT {l} {r} {body}")
@@ -705,10 +708,7 @@ class Compiler:
         else:
             j = COND_JMP.get(op)
             self.emit(f"  {j} {l} {r} {body}")
-        self.emit(f"  JMP {brk}")
-        self.emit_lbl(body)
-        for st in s.body: self._stmt(st)
-        self.emit(f"  JMP {top}"); self.emit_lbl(brk)
+        self.emit_lbl(brk)
         self.loops.pop()
 
     def _loop(self, s):
