@@ -966,19 +966,12 @@ def definition(params: lsp.DefinitionParams):
                 else:
                     target_uri = f"file://{resolved}"
             if target_uri:
-                origin = lsp.Range(
-                    start=lsp.Position(line=params.position.line, character=str_start),
-                    end=lsp.Position(line=params.position.line, character=str_end),
-                )
-                target = lsp.Range(
-                    start=lsp.Position(line=0, character=0),
-                    end=lsp.Position(line=0, character=0),
-                )
-                return lsp.LocationLink(
-                    target_uri=target_uri,
-                    target_range=target,
-                    target_selection_range=target,
-                    origin_selection_range=origin,
+                return lsp.Location(
+                    uri=target_uri,
+                    range=lsp.Range(
+                        start=lsp.Position(line=0, character=0),
+                        end=lsp.Position(line=0, character=0),
+                    ),
                 )
             return None
 
