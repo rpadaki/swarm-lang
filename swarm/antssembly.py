@@ -248,6 +248,9 @@ def strip_debug_symbols(lines: list[str]) -> list[str]:
     aliases = {}
     for line in lines:
         s = line.strip()
+        comment_pos = s.find(";")
+        if comment_pos >= 0:
+            s = s[:comment_pos].strip()
         if s.startswith(".const"):
             parts = s.split(None, 2)
             if len(parts) >= 3:
