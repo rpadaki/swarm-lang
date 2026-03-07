@@ -240,6 +240,35 @@ def strip_comments_and_blanks(lines: list[str]) -> list[str]:
     return out
 
 
+def strip_debug_symbols(lines: list[str]) -> list[str]:
+    """Remove .alias, .tag, TAG instructions and anonymize state labels."""
+    import re
+    # Collect state labels (non-internal labels)
+    state_names = []
+    for line in lines:
+        s = line.strip()
+        if s.endswith(":") and not s.startswith("__") and not s.startswith("."):
+            state_names.append(s[:-1])
+    remap = {name: f"_s{i}" for i, name in enumerate(state_names)}
+
+    out = []
+    for line in lines:
+        s = line.strip()
+        if s.startswith(".alias") or s.startswith(".tag"):
+            continue
+        if re.match(r'\s*TAG\s', line):
+            continue
+        if s.endswith(":") and s[:-1] in remap:
+            out.append(f"{remap[s[:-1]]}:")
+        elif re.match(r'\s*(JMP|JNE|JEQ|JGT|JLT)\s', line):
+            for old, new in remap.items():
+                line = line.replace(f" {old}", f" {new}")
+            out.append(line)
+        else:
+            out.append(line)
+    return out
+
+
 def compile_program(source_path: Path, do_analyze: bool = False,
                     do_copy: bool = False, do_strip: bool = False):
     lines = preprocess(source_path)
@@ -251,6 +280,7 @@ def compile_program(source_path: Path, do_analyze: bool = False,
 
     if do_strip:
         lines = strip_comments_and_blanks(lines)
+        lines = strip_debug_symbols(lines)
 
     output = "\n".join(lines)
 
