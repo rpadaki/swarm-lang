@@ -241,8 +241,22 @@ def strip_comments_and_blanks(lines: list[str]) -> list[str]:
 
 
 def strip_debug_symbols(lines: list[str]) -> list[str]:
-    """Remove .alias, .tag, TAG instructions and anonymize state labels."""
+    """Remove .alias, .tag, .const, TAG, inline comments, and anonymize labels."""
     import re
+    # Collect .const and .alias definitions for expansion
+    consts = {}
+    aliases = {}
+    for line in lines:
+        s = line.strip()
+        if s.startswith(".const"):
+            parts = s.split(None, 2)
+            if len(parts) >= 3:
+                consts[parts[1]] = parts[2]
+        elif s.startswith(".alias"):
+            parts = s.split()
+            if len(parts) >= 3:
+                aliases[parts[1]] = parts[2]
+
     # Collect state labels (non-internal labels)
     state_names = []
     for line in lines:
@@ -254,13 +268,24 @@ def strip_debug_symbols(lines: list[str]) -> list[str]:
     out = []
     for line in lines:
         s = line.strip()
-        if s.startswith(".alias") or s.startswith(".tag"):
+        if s.startswith((".alias", ".tag", ".const")):
             continue
         if re.match(r'\s*TAG\s', line):
             continue
+        # Strip inline comments
+        comment_pos = line.find(";")
+        if comment_pos >= 0:
+            line = line[:comment_pos].rstrip()
+            if not line:
+                continue
+        # Expand .const and .alias references
+        for name, value in consts.items():
+            line = re.sub(rf'\b{re.escape(name)}\b', value, line)
+        for name, value in aliases.items():
+            line = re.sub(rf'\b{re.escape(name)}\b', value, line)
         if s.endswith(":") and s[:-1] in remap:
             out.append(f"{remap[s[:-1]]}:")
-        elif re.match(r'\s*(JMP|JNE|JEQ|JGT|JLT)\s', line):
+        elif re.match(r'\s*(JMP|JNE|JEQ|JGT|JLT|CALL)\s', line):
             for old, new in remap.items():
                 line = line.replace(f" {old}", f" {new}")
             out.append(line)
