@@ -948,34 +948,13 @@ def definition(params: lsp.DefinitionParams):
                 if params.position.line == el and col < ec:
                     return None
 
-    # Cmd+click on import path string → open the package directory/file
+    # Import strings are handled by documentLink — suppress go-to-def
     import_match = re.match(r'\s*import\s+"([^"]+)"', line)
     if import_match:
-        imp_path = import_match.group(1)
         col = params.position.character
-        str_start = line.index(f'"{imp_path}"')
-        str_end = str_start + len(imp_path) + 2
+        str_start = line.index(f'"{import_match.group(1)}"')
+        str_end = str_start + len(import_match.group(1)) + 2
         if str_start <= col <= str_end:
-            resolved = _find_module(imp_path, sd)
-            if resolved:
-                if resolved.is_dir():
-                    sw_files = sorted(resolved.glob("*.sw"))
-                    if sw_files:
-                        return lsp.Location(
-                            uri=f"file://{sw_files[0]}",
-                            range=lsp.Range(
-                                start=lsp.Position(line=0, character=0),
-                                end=lsp.Position(line=0, character=0),
-                            ),
-                        )
-                else:
-                    return lsp.Location(
-                        uri=f"file://{resolved}",
-                        range=lsp.Range(
-                            start=lsp.Position(line=0, character=0),
-                            end=lsp.Position(line=0, character=0),
-                        ),
-                    )
             return None
 
     # Cmd+click on `using <name>` → open the package
