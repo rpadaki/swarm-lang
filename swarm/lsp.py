@@ -163,6 +163,7 @@ def _collect_symbols(src: str, source_dir: Path | None = None):
         "consts": {}, "funcs": [], "efuncs": {}, "tags": [], "bools": [],
         "imports": [], "packages": [], "using": set(),
         "import_paths": {},  # pkg_name -> resolved Path
+        "reg_bindings": {},  # user_name -> "pkg.extern_name"
     }
     try:
         prog = Parser(tokenize(src)).parse_program()
@@ -181,6 +182,8 @@ def _collect_symbols(src: str, source_dir: Path | None = None):
             symbols["behaviors"][node.name] = node
         if isinstance(node, RegDecl):
             symbols["registers"] = node.names
+            for user_name, qual in node.bindings.items():
+                symbols["reg_bindings"][user_name] = qual
         if isinstance(node, Const):
             symbols["consts"][node.name] = node.value
         if isinstance(node, FuncDef):
@@ -235,9 +238,12 @@ def _word_at(line: str, col: int) -> str | None:
 
 def _get_docstring(src: str, name: str) -> str | None:
     lines = src.split("\n")
+    esc = re.escape(name)
     for i, line in enumerate(lines):
-        if re.search(rf'\b(func|const)\s+{re.escape(name)}\b', line) or \
-           re.search(rf'\bexport\s+(?:action\s+)?(?:func|const)\s+{re.escape(name)}\b', line):
+        if re.search(rf'\b(func|const)\s+{esc}\b', line) or \
+           re.search(rf'\bexport\s+(?:action\s+)?(?:func|const)\s+{esc}\b', line) or \
+           re.search(rf'\bextern\s+register\s+{esc}\b', line) or \
+           re.search(rf'\bregister\s+.*\b{esc}\b', line):
             doc_lines = []
             j = i - 1
             while j >= 0 and lines[j].strip().startswith("//"):
@@ -254,6 +260,22 @@ def _find_const_docstring(name: str, local_src: str, symbols: dict, sd: Path | N
     doc = _get_docstring(local_src, name)
     if doc:
         return doc
+    for imp in symbols.get("imports", []):
+        try:
+            resolved = _find_module(imp, sd)
+            if not resolved:
+                continue
+            sw_files = sorted(resolved.glob("*.sw")) if resolved.is_dir() else [resolved]
+            for sw_file in sw_files:
+                doc = _get_docstring(sw_file.read_text(), name)
+                if doc:
+                    return doc
+        except Exception:
+            pass
+    return None
+
+
+def _find_extern_docstring(name: str, symbols: dict, sd: Path | None) -> str | None:
     for imp in symbols.get("imports", []):
         try:
             resolved = _find_module(imp, sd)
@@ -876,9 +898,20 @@ def hover(params: lsp.HoverParams):
 
     if word in symbols["registers"]:
         idx = symbols["registers"].index(word) + 1
+        binding = symbols["reg_bindings"].get(word)
+        if binding:
+            sig = f"**register** `{word}` → `r{idx}` (bound to `{binding}`)"
+        else:
+            sig = f"**register** `{word}` → `r{idx}`"
+        docstr = _get_docstring(doc.source, word)
+        if not docstr and binding:
+            pkg, ext_name = binding.rsplit(".", 1)
+            docstr = _find_extern_docstring(ext_name, symbols, sd)
+        if docstr:
+            sig += f"\n\n{docstr}"
         return lsp.Hover(contents=lsp.MarkupContent(
             kind=lsp.MarkupKind.Markdown,
-            value=f"**register** `{word}` → `r{idx}`",
+            value=sig,
         ))
 
     if word in symbols["bools"]:
