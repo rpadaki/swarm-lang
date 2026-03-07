@@ -12,7 +12,7 @@ init {
 
 state wander {
     if carrying() { become go_home }
-    if probe(HERE) == FOOD {
+    if probe(HERE) == CELL_FOOD {
         pickup()
         become go_home
     }

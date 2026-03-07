@@ -156,7 +156,7 @@ executes:
 ```
 state search {
     if carrying() { become start_return }
-    if probe(HERE) == FOOD { become try_pickup }
+    if probe(HERE) == CELL_FOOD { become try_pickup }
     move(RANDOM)
     become search
 }
@@ -197,7 +197,7 @@ behavior random_walk {
     exit found_food
     exit found_trail
 
-    if probe(HERE) == FOOD { become found_food }
+    if probe(HERE) == CELL_FOOD { become found_food }
 
     scratch = sense(FOOD)
     if scratch != 0 { become found_food }
@@ -207,7 +207,7 @@ behavior random_walk {
 
     if last_dir != 0 {
         scratch = probe(last_dir)
-        if scratch != WALL {
+        if scratch != CELL_WALL {
             move(last_dir)
             become self
         }
@@ -370,7 +370,7 @@ A predicate can declare conditions under which a volatile return is actually
 stable (will not change between ticks):
 
 ```
-export func probe(direction) -> volatile result stable(result == WALL || result == NEST) {
+export func probe(direction) -> volatile result stable(result == CELL_WALL || result == CELL_NEST) {
     asm { PROBE direction result }
 }
 ```
@@ -498,7 +498,7 @@ Truthiness shorthand: `if expr { ... }` is equivalent to `if expr != 0 { ... }`.
 ```
 tmp = 0
 while tmp < 4 {
-    if probe(dir) != WALL {
+    if probe(dir) != CELL_WALL {
         move(dir)
         become search
     }
@@ -512,7 +512,7 @@ while tmp < 4 {
 ```
 loop {
     scratch = probe(dir)
-    if scratch != WALL { break }
+    if scratch != CELL_WALL { break }
     dir += 1
 }
 ```
@@ -521,8 +521,8 @@ loop {
 
 ```
 match probe(HERE) {
-    case FOOD { become try_pickup }
-    case NEST { become drop_food }
+    case CELL_FOOD { become try_pickup }
+    case CELL_NEST { become drop_food }
     default   { become search }
 }
 ```
@@ -612,14 +612,24 @@ export func sense(target) -> volatile result stable(target == WALL || target == 
 | `HERE` | 0 | Current cell |
 | `RANDOM` | 5 | Random direction |
 
-#### Cell Types
+#### Sense Targets (for `sense()`)
 
 | Name | Value | Description |
 |---|---|---|
-| `EMPTY` | 0 | Empty cell |
-| `WALL` | 1 | Wall |
-| `FOOD` | 2 | Food source |
-| `NEST` | 3 | Ant nest |
+| `FOOD` | 0 | Scan for food |
+| `WALL` | 1 | Scan for walls |
+| `NEST` | 2 | Scan for nest |
+| `ANT` | 3 | Scan for other ants |
+| `EMPTY` | 4 | Scan for empty cells |
+
+#### Cell Types (returned by `probe()`)
+
+| Name | Value | Description |
+|---|---|---|
+| `CELL_EMPTY` | 0 | Empty cell |
+| `CELL_WALL` | 1 | Wall |
+| `CELL_FOOD` | 2 | Food source |
+| `CELL_NEST` | 3 | Ant nest |
 
 #### Pheromone Channels
 
@@ -647,8 +657,8 @@ register (
 
 | Function | Returns | Volatility |
 |---|---|---|
-| `sense(target)` | Direction to nearest cell of type (1-4), or 0 | volatile, stable when `target == WALL \|\| target == NEST` |
-| `probe(direction)` | Cell type: EMPTY(0), WALL(1), FOOD(2), NEST(3) | volatile, stable when `result == WALL \|\| result == NEST` |
+| `sense(target)` | Direction to nearest match (1-4), or 0 | volatile, stable when `target == WALL \|\| target == NEST` |
+| `probe(direction)` | Cell type: CELL_EMPTY(0), CELL_WALL(1), CELL_FOOD(2), CELL_NEST(3) | volatile, stable when `result == CELL_WALL \|\| result == CELL_NEST` |
 | `smell(channel)` | Direction of strongest pheromone (1-4), or 0 | volatile |
 | `sniff(channel, direction)` | Pheromone intensity (0-255) | volatile |
 | `carrying()` | 1 if carrying food, 0 otherwise | stable |
@@ -755,7 +765,7 @@ init { become search }
 
 state search {
     if carrying() { become start_return }
-    if probe(HERE) == FOOD { become try_pickup }
+    if probe(HERE) == CELL_FOOD { become try_pickup }
 
     if mark_str {
         mark(CH_GREEN, mark_str)
@@ -768,14 +778,14 @@ state search {
     }
 
     if heading {
-        if probe(heading) != WALL {
+        if probe(heading) != CELL_WALL {
             move(heading)
             become search
         }
     }
 
     dir = rand(1, 5)
-    if probe(dir) != WALL {
+    if probe(dir) != CELL_WALL {
         move(dir)
         become search
     }
@@ -785,7 +795,7 @@ state search {
 }
 
 state try_pickup {
-    if probe(HERE) != FOOD { become search }
+    if probe(HERE) != CELL_FOOD { become search }
     pickup()
     become check_carry
 }
@@ -829,12 +839,12 @@ state reset_coords {
 state beeline_home {
     if x {
         if x > 0 {
-            if probe(W) != WALL {
+            if probe(W) != CELL_WALL {
                 move(W)
                 become return_home
             }
         } else {
-            if probe(E) != WALL {
+            if probe(E) != CELL_WALL {
                 move(E)
                 become return_home
             }
@@ -843,12 +853,12 @@ state beeline_home {
 
     if y {
         if y > 0 {
-            if probe(N) != WALL {
+            if probe(N) != CELL_WALL {
                 move(N)
                 become return_home
             }
         } else {
-            if probe(S) != WALL {
+            if probe(S) != CELL_WALL {
                 move(S)
                 become return_home
             }

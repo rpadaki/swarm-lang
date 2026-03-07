@@ -14,13 +14,13 @@ register (
 behavior wander {
     exit found_food
 
-    if probe(HERE) == FOOD { become found_food }
+    if probe(HERE) == CELL_FOOD { become found_food }
     if dir := sense(FOOD) {
         move(dir)
         become found_food
     }
 
-    if probe(heading) != WALL {
+    if probe(heading) != CELL_WALL {
         move(heading)
         become self
     }
@@ -36,25 +36,25 @@ behavior beeline_home {
     if dir := sense(NEST) { become arrived }
 
     if dx > 0 {
-        if probe(W) != WALL {
+        if probe(W) != CELL_WALL {
             move(W)
             become self
         }
     }
     if dx < 0 {
-        if probe(E) != WALL {
+        if probe(E) != CELL_WALL {
             move(E)
             become self
         }
     }
     if dy > 0 {
-        if probe(N) != WALL {
+        if probe(N) != CELL_WALL {
             move(N)
             become self
         }
     }
     if dy < 0 {
-        if probe(S) != WALL {
+        if probe(S) != CELL_WALL {
             move(S)
             become self
         }

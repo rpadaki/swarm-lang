@@ -5,15 +5,15 @@ package ant
 // sense scans the four adjacent cells for the given target type and returns
 // the direction (N=1, E=2, S=3, W=4) of the nearest match, or 0 if none
 // is found. Ties are broken randomly. Valid targets are FOOD, WALL, NEST,
-// and EMPTY. The result is stable for WALL and NEST (they never change).
+// ANT, and EMPTY. The result is stable for WALL and NEST (they never change).
 export func sense(target) -> volatile result stable(target == WALL || target == NEST) {
     asm { SENSE target result }
 }
 
-// probe inspects the cell at the given direction and returns its type:
-// EMPTY (0), WALL (1), FOOD (2), or NEST (3). The result is stable when
-// the cell is a WALL or NEST.
-export func probe(direction) -> volatile result stable(result == WALL || result == NEST) {
+// probe inspects the cell at the given direction and returns its cell type:
+// CELL_EMPTY (0), CELL_WALL (1), CELL_FOOD (2), or CELL_NEST (3). The
+// result is stable when the cell is a wall or nest.
+export func probe(direction) -> volatile result stable(result == CELL_WALL || result == CELL_NEST) {
     asm { PROBE direction result }
 }
 
