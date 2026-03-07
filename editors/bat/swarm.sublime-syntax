@@ -116,13 +116,32 @@ contexts:
         - match: \(
           scope: punctuation.section.parens.begin.swarm
           set:
-            - match: \b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\b
+            - include: comments
+            - match: \b([A-Za-z_]\w*)\b
               scope: variable.other.swarm
-            - match: ','
-              scope: punctuation.separator.swarm
+              push:
+                - match: \(
+                  scope: punctuation.section.parens.begin.swarm
+                  set:
+                    - match: \b([A-Za-z_]\w*)\.([A-Za-z_]\w*)\b
+                      captures:
+                        1: entity.name.namespace.swarm
+                        2: variable.other.swarm
+                    - match: \b([A-Za-z_]\w*)\b
+                      scope: variable.other.swarm
+                    - match: \)
+                      scope: punctuation.section.parens.end.swarm
+                      pop: true
+                - match: (?=[,\)=\n])
+                  pop: true
             - match: '='
               scope: keyword.operator.assignment.swarm
-            - include: expressions
+              push:
+                - include: expressions
+                - match: (?=[,\)])
+                  pop: true
+            - match: ','
+              scope: punctuation.separator.swarm
             - match: \)
               scope: punctuation.section.parens.end.swarm
               pop: true
