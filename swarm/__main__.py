@@ -35,6 +35,9 @@ def main():
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
         print(HELP, end="", file=sys.stderr)
         sys.exit(0 if len(sys.argv) > 1 else 1)
+    if sys.argv[1] in ("-V", "--version", "version"):
+        print("swarm 0.1.0")
+        sys.exit(0)
 
     subcommand = sys.argv[1]
 
