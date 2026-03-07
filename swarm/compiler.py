@@ -1,6 +1,7 @@
 """Swarm Language compiler: AST -> Antssembly."""
 
 import copy
+import re
 from pathlib import Path
 
 from .ast import *
@@ -302,7 +303,7 @@ class Compiler:
                 result.append(f"{remap[line[:-1]]}:")
             elif line.lstrip().startswith(("JMP ", "JNE ", "JEQ ", "JGT ", "JLT ")):
                 for old, new in remap.items():
-                    line = line.replace(f" {old}", f" {new}")
+                    line = re.sub(rf'\b{re.escape(old)}\b', new, line)
                 result.append(line)
             else:
                 result.append(line)

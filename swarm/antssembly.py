@@ -287,7 +287,7 @@ def strip_debug_symbols(lines: list[str]) -> list[str]:
             out.append(f"{remap[s[:-1]]}:")
         elif re.match(r'\s*(JMP|JNE|JEQ|JGT|JLT|CALL)\s', line):
             for old, new in remap.items():
-                line = line.replace(f" {old}", f" {new}")
+                line = re.sub(rf'\b{re.escape(old)}\b', new, line)
             out.append(line)
         else:
             out.append(line)
