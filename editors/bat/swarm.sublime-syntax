@@ -273,7 +273,7 @@ contexts:
           scope: punctuation.section.braces.begin.swarm
           set:
             - meta_scope: meta.asm.swarm
-            - match: \b(SENSE|PROBE|SMELL|SNIFF|CARRYING|ID|RANDOM|MOVE|PICKUP|DROP|MARK|TAG|SET|ADD|SUB|MUL|DIV|MOD|AND|OR|XOR|LSHIFT|RSHIFT|JMP|JEQ|JNE|JGT|JLT)\b
+            - match: \b(SENSE|PROBE|SMELL|SNIFF|CARRYING|ID|RANDOM|MOVE|PICKUP|DROP|MARK|TAG|SET|ADD|SUB|MUL|DIV|MOD|AND|OR|XOR|LSHIFT|RSHIFT|JMP|JEQ|JNE|JGT|JLT|CALL)\b
               scope: keyword.operator.asm.swarm
             - match: \b(r[0-7])\b
               scope: variable.language.register.swarm
@@ -296,7 +296,9 @@ contexts:
   builtins:
     - match: \b(N|E|S|W|NORTH|EAST|SOUTH|WEST|HERE|RANDOM)\b
       scope: constant.language.direction.swarm
-    - match: \b(EMPTY|WALL|FOOD|NEST)\b
+    - match: \b(FOOD|WALL|NEST|ANT|EMPTY)\b
+      scope: constant.language.target.swarm
+    - match: \b(CELL_EMPTY|CELL_WALL|CELL_FOOD|CELL_NEST)\b
       scope: constant.language.cell.swarm
     - match: \b(CH_RED|CH_BLUE|CH_GREEN|CH_YELLOW)\b
       scope: constant.language.channel.swarm
@@ -312,6 +314,8 @@ contexts:
       scope: keyword.operator.comparison.swarm
     - match: '[+\-*/%&|^]='
       scope: keyword.operator.assignment.compound.swarm
+    - match: '&&|\|\|'
+      scope: keyword.operator.logical.swarm
     - match: '<<|>>'
       scope: keyword.operator.bitwise.swarm
     - match: '[<>]'
