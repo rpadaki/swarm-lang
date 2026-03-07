@@ -6,12 +6,19 @@ package ant
 
 // dx tracks the ant's horizontal displacement from its starting cell.
 // Incremented on east moves, decremented on west moves.
+// Approximate — wall collisions are not detected.
+// Bind via register ( myname(ant.dx) ); DCE'd if unbound.
+extern register dx
+
 // dy tracks the ant's vertical displacement from its starting cell.
 // Decremented on north moves, incremented on south moves.
+// Approximate — wall collisions are not detected.
+// Bind via register ( myname(ant.dy) ); DCE'd if unbound.
+extern register dy
+
 // last_dir stores the direction of the ant's most recent move (N=1..W=4).
-// All three are approximate — wall collisions are not detected.
-// Bind via register ( myname(ant.dx) ); DCE'd if unbound.
-extern register dx, dy, last_dir
+// Bind via register ( myname(ant.last_dir) ); DCE'd if unbound.
+extern register last_dir
 
 // move moves the ant one cell in the given direction (N/E/S/W/RANDOM).
 // Moving into a wall is a no-op but still consumes the tick. Consumes a tick.
