@@ -1,4 +1,4 @@
-"""CLI entry point: uv run python -m swarm [subcommand] [args]
+"""CLI entry point: uv run swarm [subcommand] [args]
 
 Subcommands:
     compile   Compile a .sw file to antssembly (default)
@@ -14,7 +14,7 @@ import sys
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python -m swarm <file.sw | subcommand> [args]", file=sys.stderr)
+        print("Usage: swarm <file.sw | subcommand> [args]", file=sys.stderr)
         print("Subcommands: compile, check, fmt, stats, lsp, antssembly", file=sys.stderr)
         sys.exit(1)
 
@@ -54,7 +54,7 @@ def _compile():
     from .optimize import OptConfig, OPT_NONE
 
     if len(sys.argv) < 2:
-        print("Usage: python -m swarm <file.sw> [--copy] [-o out.ant] [-O0]", file=sys.stderr)
+        print("Usage: swarm <file.sw> [--copy] [-o out.ant] [-O0]", file=sys.stderr)
         sys.exit(1)
     src = Path(sys.argv[1])
     do_copy = "--copy" in sys.argv
