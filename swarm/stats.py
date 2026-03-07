@@ -52,8 +52,8 @@ def stats(path: Path):
 
     # Compile and count instructions
     prog2 = Parser(tokenize(src)).parse_program()
-    prog2, packages = resolve_imports(prog2, path.parent)
-    compiler = Compiler(packages)
+    prog2, packages, pkg_externs = resolve_imports(prog2, path.parent)
+    compiler = Compiler(packages, pkg_externs)
     output = compiler.compile(prog2)
     output_lines = output.split("\n")
 

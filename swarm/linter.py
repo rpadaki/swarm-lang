@@ -244,7 +244,7 @@ def main():
     path = Path(sys.argv[1])
     src = path.read_text()
     prog = Parser(tokenize(src)).parse_program()
-    prog, _packages = resolve_imports(prog, source_dir=path.parent)
+    prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=path.parent)
     warns = check(prog)
 
     if warns:

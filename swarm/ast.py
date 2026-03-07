@@ -12,6 +12,7 @@ class Const:
 @dataclass
 class RegDecl:
     names: list[str]
+    bindings: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -157,6 +158,8 @@ class ExportFunc:
     body: list
     exported: bool = True
     is_action: bool = False
+    is_volatile: bool = False
+    stable_predicate: str | None = None
 
 
 @dataclass
@@ -172,6 +175,11 @@ class Break:
 @dataclass
 class Continue:
     pass
+
+
+@dataclass
+class ExternRegDecl:
+    names: list[str]
 
 
 @dataclass

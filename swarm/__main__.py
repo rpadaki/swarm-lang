@@ -61,8 +61,8 @@ def _compile():
     if "-o" in sys.argv: out_file = Path(sys.argv[sys.argv.index("-o") + 1])
 
     prog = Parser(tokenize(src.read_text())).parse_program()
-    prog, packages = resolve_imports(prog, src.parent)
-    output = Compiler(packages).compile(prog)
+    prog, packages, pkg_externs = resolve_imports(prog, src.parent)
+    output = Compiler(packages, pkg_externs).compile(prog)
 
     if out_file:
         out_file.write_text(output + "\n")

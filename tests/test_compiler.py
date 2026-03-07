@@ -10,8 +10,8 @@ from swarm.compiler import Compiler, resolve_imports, _find_module, LIB_DIR
 
 def compile_src(src: str) -> str:
     prog = Parser(tokenize(src)).parse_program()
-    prog, packages = resolve_imports(prog, source_dir=None)
-    return Compiler(packages).compile(prog)
+    prog, packages, pkg_externs = resolve_imports(prog, source_dir=None)
+    return Compiler(packages, pkg_externs).compile(prog)
 
 
 MINIMAL = """\
@@ -80,7 +80,7 @@ class TestResolveImports(unittest.TestCase):
     def test_resolve_imports_brings_in_exports(self):
         src = 'import "libant"'
         prog = Parser(tokenize(src)).parse_program()
-        resolved, _packages = resolve_imports(prog)
+        resolved, _packages, _pkg_externs = resolve_imports(prog)
         names = [n.name for n in resolved if hasattr(n, "name")]
         self.assertIn("sense", names)
         self.assertIn("probe", names)
@@ -95,7 +95,7 @@ class TestResolveImports(unittest.TestCase):
     def test_import_ant_resolves(self):
         src = 'import "ant"'
         prog = Parser(tokenize(src)).parse_program()
-        resolved, packages = resolve_imports(prog)
+        resolved, packages, _pkg_externs = resolve_imports(prog)
         self.assertIn("ant", packages)
         names = [n.name for n in resolved if hasattr(n, "name")]
         self.assertIn("sense", names)
@@ -159,7 +159,7 @@ class TestPackageSystem(unittest.TestCase):
     def test_import_detects_package_name(self):
         src = 'import "libant"'
         prog = Parser(tokenize(src)).parse_program()
-        _resolved, packages = resolve_imports(prog)
+        _resolved, packages, _pkg_externs = resolve_imports(prog)
         self.assertIn("ant", packages)
 
     def test_package_exports_available_qualified(self):
@@ -194,12 +194,30 @@ state s {
     def test_action_func_is_action_flag(self):
         src = 'import "libant"'
         prog = Parser(tokenize(src)).parse_program()
-        _resolved, packages = resolve_imports(prog)
+        _resolved, packages, _pkg_externs = resolve_imports(prog)
         ant_exports = packages["ant"]
         move_ef = next(e for e in ant_exports if hasattr(e, 'name') and e.name == "move")
         self.assertTrue(move_ef.is_action)
         sense_ef = next(e for e in ant_exports if hasattr(e, 'name') and e.name == "sense")
         self.assertFalse(sense_ef.is_action)
+
+    def test_volatile_annotations_survive_import(self):
+        src = 'import "libant"'
+        prog = Parser(tokenize(src)).parse_program()
+        _resolved, packages, _pkg_externs = resolve_imports(prog)
+        ant_exports = packages["ant"]
+        sense_ef = next(e for e in ant_exports if hasattr(e, 'name') and e.name == "sense")
+        self.assertTrue(sense_ef.is_volatile)
+        self.assertIsNotNone(sense_ef.stable_predicate)
+        probe_ef = next(e for e in ant_exports if hasattr(e, 'name') and e.name == "probe")
+        self.assertTrue(probe_ef.is_volatile)
+        self.assertIsNotNone(probe_ef.stable_predicate)
+        smell_ef = next(e for e in ant_exports if hasattr(e, 'name') and e.name == "smell")
+        self.assertTrue(smell_ef.is_volatile)
+        self.assertIsNone(smell_ef.stable_predicate)
+        carrying_ef = next(e for e in ant_exports if hasattr(e, 'name') and e.name == "carrying")
+        self.assertFalse(carrying_ef.is_volatile)
+        self.assertIsNone(carrying_ef.stable_predicate)
 
     def test_contains_post_move(self):
         out = compile_src(MINIMAL)
@@ -245,6 +263,105 @@ state s {
 """
         out = compile_src(src)
         self.assertIn("MOVE", out)
+
+
+class TestExternRegisterDCE(unittest.TestCase):
+    def test_unbound_extern_no_crash(self):
+        """Program that imports ant but doesn't bind dx/dy should compile without errors."""
+        src = """\
+import "libant"
+using ant
+register dir, next_st
+init { become s }
+state s {
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertIn("MOVE", out)
+
+    def test_bound_extern_compiles(self):
+        """Program that binds extern registers should compile normally."""
+        src = """\
+import "libant"
+using ant
+register dir, x(ant.dx), y(ant.dy), heading(ant.last_dir), next_st
+init { x = 0 y = 0 become s }
+state s {
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertIn("MOVE", out)
+
+    def test_extern_registers_detected_in_packages(self):
+        """resolve_imports should detect extern register declarations."""
+        from swarm.tokenizer import tokenize
+        from swarm.parser import Parser
+        src = 'import "libant"'
+        prog = Parser(tokenize(src)).parse_program()
+        _resolved, _packages, pkg_externs = resolve_imports(prog)
+        self.assertIn("ant", pkg_externs)
+        self.assertIn("dx", pkg_externs["ant"])
+        self.assertIn("dy", pkg_externs["ant"])
+        self.assertIn("last_dir", pkg_externs["ant"])
+
+
+class TestDCEPass(unittest.TestCase):
+    def test_dead_code_after_jmp_removed(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "main:",
+            "  SET r1 0",
+            "  JMP done",
+            "  SET r2 1",
+            "  SET r3 2",
+            "done:",
+            "  SET r4 3",
+        ]
+        result = dce(lines)
+        self.assertIn("  SET r1 0", result)
+        self.assertIn("  JMP done", result)
+        self.assertNotIn("  SET r2 1", result)
+        self.assertNotIn("  SET r3 2", result)
+        self.assertIn("done:", result)
+        self.assertIn("  SET r4 3", result)
+
+    def test_noop_set_removed(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "  SET r1 r1",
+            "  SET r1 r2",
+        ]
+        result = dce(lines)
+        self.assertNotIn("  SET r1 r1", result)
+        self.assertIn("  SET r1 r2", result)
+
+    def test_duplicate_labels_removed(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "label:",
+            "label:",
+            "  SET r1 0",
+        ]
+        result = dce(lines)
+        self.assertEqual(result.count("label:"), 1)
+        self.assertIn("  SET r1 0", result)
+
+    def test_jump_target_preserved_after_jmp(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "  JMP a",
+            "  SET r1 0",
+            "b:",
+            "  SET r2 1",
+        ]
+        result = dce(lines)
+        self.assertNotIn("  SET r1 0", result)
+        self.assertIn("b:", result)
+        self.assertIn("  SET r2 1", result)
 
 
 if __name__ == "__main__":

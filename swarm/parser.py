@@ -57,6 +57,7 @@ class Parser:
             if t.value == "using":    return self.parse_using()
             if t.value == "import":   return self.parse_import()
             if t.value == "export":   return self.parse_export()
+            if t.value == "extern":   return self.parse_extern()
             if t.value == "const":    return self.parse_const()
             if t.value == "register": return self.parse_register()
             if t.value == "tag":      return self.parse_tag()
@@ -93,10 +94,17 @@ class Parser:
             return ExportFunc(
                 f.name, f.params if hasattr(f, 'params') else [],
                 f.ret if hasattr(f, 'ret') else None, f.body, True, is_action=True,
+                is_volatile=getattr(f, 'is_volatile', False),
+                stable_predicate=getattr(f, 'stable_predicate', None),
             )
         if t.type == "IDENT" and t.value == "func":
             f = self.parse_func()
-            return ExportFunc(f.name, f.params if hasattr(f, 'params') else [], f.ret if hasattr(f, 'ret') else None, f.body, True)
+            return ExportFunc(
+                f.name, f.params if hasattr(f, 'params') else [],
+                f.ret if hasattr(f, 'ret') else None, f.body, True,
+                is_volatile=getattr(f, 'is_volatile', False),
+                stable_predicate=getattr(f, 'stable_predicate', None),
+            )
         if t.type == "IDENT" and t.value == "const":
             c = self.parse_const()
             return ExportConst(c.name, c.value)
@@ -112,20 +120,58 @@ class Parser:
             while self.match("COMMA"): params.append(self.expect("IDENT").value)
         self.expect("RPAREN")
         ret = None
+        is_volatile = False
+        stable_predicate = None
         if self.match("ARROW"):
+            if self.at("IDENT", "volatile"):
+                self.advance()
+                is_volatile = True
             ret = self.expect("IDENT").value
+            if self.at("IDENT", "stable"):
+                self.advance()
+                self.expect("LPAREN")
+                stable_predicate = self._read_stable_predicate()
+                self.expect("RPAREN")
         body = self.parse_block()
         if params or ret:
-            return ExportFunc(name, params, ret, body, False)
+            return ExportFunc(name, params, ret, body, False,
+                              is_volatile=is_volatile, stable_predicate=stable_predicate)
         return FuncDef(name, body)
 
     def parse_const(self):
         self.advance(); n = self.expect("IDENT").value; self.expect("OP", "="); return Const(n, self.advance().value)
 
     def parse_register(self):
-        self.advance(); names = [self.expect("IDENT").value]
+        self.advance()
+        names = []
+        bindings = {}
+        name, binding = self._parse_reg_name()
+        names.append(name)
+        if binding:
+            bindings[name] = binding
+        while self.match("COMMA"):
+            name, binding = self._parse_reg_name()
+            names.append(name)
+            if binding:
+                bindings[name] = binding
+        return RegDecl(names, bindings)
+
+    def _parse_reg_name(self):
+        name = self.expect("IDENT").value
+        binding = None
+        if self.match("LPAREN"):
+            binding = self._read_maybe_qualified()
+            self.expect("RPAREN")
+        return name, binding
+
+    def parse_extern(self):
+        self.advance()
+        if not self.at("IDENT", "register"):
+            raise SyntaxError(f"line {self.peek().line}: expected 'register' after 'extern'")
+        self.advance()
+        names = [self.expect("IDENT").value]
         while self.match("COMMA"): names.append(self.expect("IDENT").value)
-        return RegDecl(names)
+        return ExternRegDecl(names)
 
     def parse_tag(self):
         self.advance()
@@ -177,6 +223,31 @@ class Parser:
             else:
                 body.append(self.parse_stmt())
         return BehaviorDef(name, params, exits, body)
+
+    def _read_stable_predicate(self):
+        """Read a raw predicate string from inside stable(...), handling nested parens."""
+        depth = 1
+        parts = []
+        while depth > 0:
+            t = self.peek()
+            if t is None:
+                raise SyntaxError("unexpected EOF in stable predicate")
+            if t.type == "LPAREN":
+                depth += 1
+                parts.append("(")
+                self.advance()
+            elif t.type == "RPAREN":
+                depth -= 1
+                if depth == 0:
+                    break
+                parts.append(")")
+                self.advance()
+            else:
+                parts.append(t.value)
+                self.advance()
+        raw = " ".join(parts)
+        raw = raw.replace("| |", "||").replace("& &", "&&")
+        return raw
 
     def parse_block(self):
         self.expect("LBRACE"); stmts = []

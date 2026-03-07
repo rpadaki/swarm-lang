@@ -26,8 +26,8 @@ KNOWN_REGISTER_OVERFLOW = {
 def compile_file(path: Path) -> str:
     src = path.read_text()
     prog = Parser(tokenize(src)).parse_program()
-    prog, packages = resolve_imports(prog, source_dir=path.parent)
-    return Compiler(packages).compile(prog)
+    prog, packages, pkg_externs = resolve_imports(prog, source_dir=path.parent)
+    return Compiler(packages, pkg_externs).compile(prog)
 
 
 def _make_test(path: Path):

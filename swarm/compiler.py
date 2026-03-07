@@ -6,6 +6,7 @@ from pathlib import Path
 from .ast import *
 from .tokenizer import tokenize
 from .parser import Parser
+from .optimize.dce import dce
 
 BINOP = {"+":"ADD","-":"SUB","*":"MUL","/":"DIV","%":"MOD",
          "&":"AND","|":"OR","^":"XOR","<<":"LSHIFT",">>":"RSHIFT"}
@@ -17,6 +18,7 @@ LIB_DIR = Path(__file__).resolve().parent.parent / "lib"
 
 def resolve_imports(prog, source_dir: Path | None = None):
     packages: dict[str, list] = {}
+    pkg_externs: dict[str, set[str]] = {}
     resolved = []
     for node in prog:
         if isinstance(node, Import):
@@ -29,13 +31,18 @@ def resolve_imports(prog, source_dir: Path | None = None):
                 if isinstance(m, PackageDecl):
                     pkg_name = m.name
             exports = []
+            externs: set[str] = set()
             for m in mod_prog:
                 if isinstance(m, ExportFunc):
                     exports.append(m)
                 elif isinstance(m, ExportConst):
                     exports.append(m)
+                elif isinstance(m, ExternRegDecl):
+                    externs.update(m.names)
             if pkg_name:
                 packages[pkg_name] = exports
+                if externs:
+                    pkg_externs[pkg_name] = externs
             for m in exports:
                 if isinstance(m, ExportFunc):
                     resolved.append(m)
@@ -45,7 +52,7 @@ def resolve_imports(prog, source_dir: Path | None = None):
             resolved.append(node)
         else:
             resolved.append(node)
-    return resolved, packages
+    return resolved, packages, pkg_externs
 
 
 def _find_module(name: str, source_dir: Path | None) -> Path | None:
@@ -61,7 +68,7 @@ def _find_module(name: str, source_dir: Path | None) -> Path | None:
 
 
 class Compiler:
-    def __init__(self, packages: dict | None = None):
+    def __init__(self, packages: dict | None = None, pkg_externs: dict | None = None):
         self.out: list[str] = []
         self.consts: dict = {}
         self.regs: dict = {}
@@ -79,6 +86,8 @@ class Compiler:
         self.packages: dict[str, list] = packages or {}
         self._pkg_efuncs: dict[str, ExportFunc] = {}
         self._pkg_consts: dict[str, str] = {}
+        self._pkg_externs: dict[str, set[str]] = pkg_externs or {}
+        self._extern_bindings: dict[str, str] = {}
         self._build_package_index()
 
     def _build_package_index(self):
@@ -186,6 +195,7 @@ class Compiler:
             elif isinstance(s, BehaviorDef): behaviors[s.name] = s
             elif isinstance(s, UsingDecl):  self._apply_using(s.name)
             elif isinstance(s, PackageDecl): pass
+            elif isinstance(s, ExternRegDecl): pass
             elif isinstance(s, StateFromBehavior):
                 beh = behaviors.get(s.behavior)
                 if not beh: raise RuntimeError(f"unknown behavior: {s.behavior}")
@@ -219,6 +229,7 @@ class Compiler:
             for s in sb.body: self._stmt(s)
 
         if self.states: self._post_move()
+        self.out = dce(self.out)
         return "\n".join(self.out)
 
     def _post_move(self):
@@ -259,6 +270,8 @@ class Compiler:
             if self.nreg >= 8: raise RuntimeError(f"out of registers for '{n}'")
             r = f"r{self.nreg}"; self.nreg += 1; self.regs[n] = r
             self.emit(f".alias {n} {r}")
+        for user_name, extern_qual in s.bindings.items():
+            self._extern_bindings[extern_qual] = user_name
 
     def _booldecl(self, s):
         if not self.bool_reg:
@@ -336,17 +349,128 @@ class Compiler:
                 return
         raise RuntimeError(f"line {e.line}: unknown func: {e.func} (did you forget: import \"libant\"?)")
 
+    def _all_externs(self):
+        """Return the set of all extern register names across all packages."""
+        result = set()
+        for names in self._pkg_externs.values():
+            result.update(names)
+        return result
+
+    def _is_extern_bound(self, name):
+        """Check if an extern register name is bound by the user program."""
+        for pkg_name, externs in self._pkg_externs.items():
+            if name in externs:
+                qual = f"{pkg_name}.{name}"
+                if qual in self._extern_bindings:
+                    return True
+        return False
+
+    def _stmt_refs_names(self, s):
+        """Collect all identifier names referenced by a statement."""
+        names = set()
+        if isinstance(s, Assignment):
+            names.add(s.target)
+            names.update(self._expr_refs_names(s.expr))
+        elif isinstance(s, IfStmt):
+            names.update(self._cond_refs_names(s.cond))
+            for st in s.body:
+                names.update(self._stmt_refs_names(st))
+            if s.else_body:
+                for st in s.else_body:
+                    names.update(self._stmt_refs_names(st))
+        elif isinstance(s, WhileStmt):
+            names.update(self._cond_refs_names(s.cond))
+            for st in s.body:
+                names.update(self._stmt_refs_names(st))
+        elif isinstance(s, LoopStmt):
+            for st in s.body:
+                names.update(self._stmt_refs_names(st))
+        elif isinstance(s, ActionStmt):
+            for a in s.args:
+                names.add(a)
+        elif isinstance(s, FuncCall):
+            names.add(s.name)
+        elif isinstance(s, AsmBlock):
+            names.update(s.tokens)
+        elif isinstance(s, MatchStmt):
+            names.update(self._expr_refs_names(s.var))
+            for c in s.cases:
+                for st in c.body:
+                    names.update(self._stmt_refs_names(st))
+            if s.default_body:
+                for st in s.default_body:
+                    names.update(self._stmt_refs_names(st))
+        return names
+
+    def _expr_refs_names(self, e):
+        """Collect all identifier names referenced by an expression."""
+        if isinstance(e, str):
+            return {e}
+        if isinstance(e, BinExpr):
+            return self._expr_refs_names(e.left) | self._expr_refs_names(e.right)
+        if isinstance(e, CallExpr):
+            names = {e.func}
+            for a in e.args:
+                names.add(a)
+            return names
+        return set()
+
+    def _cond_refs_names(self, cond):
+        left, op, right = cond
+        names = set()
+        if isinstance(left, str):
+            names.add(left)
+        elif isinstance(left, CallExpr):
+            names.update(self._expr_refs_names(left))
+        elif isinstance(left, Assignment):
+            names.update(self._stmt_refs_names(left))
+        if isinstance(right, str):
+            names.add(right)
+        return names
+
+    def _stmt_uses_unbound_extern(self, s, all_externs):
+        """Check if a statement references any unbound extern register."""
+        refs = self._stmt_refs_names(s)
+        for name in refs:
+            if name in all_externs and not self._is_extern_bound(name):
+                return True
+        return False
+
     def _inline_efunc(self, ef, args, tgt):
         if len(args) != len(ef.params):
             raise RuntimeError(f"func '{ef.name}': expected {len(ef.params)} args, got {len(args)}")
         bindings = dict(zip(ef.params, args))
         if ef.ret and tgt:
             bindings[ef.ret] = tgt
+        all_externs = self._all_externs()
         for s in ef.body:
+            if all_externs and self._stmt_uses_unbound_extern(s, all_externs):
+                continue
             if isinstance(s, AsmBlock):
                 self._asm_block(s.tokens, bindings)
             else:
-                self._stmt(s)
+                self._inline_stmt(s, bindings, all_externs)
+
+    def _inline_stmt(self, s, bindings, all_externs):
+        """Compile a statement from an inlined efunc, applying DCE for unbound externs."""
+        if isinstance(s, IfStmt) and all_externs:
+            if self._cond_uses_unbound_extern(s.cond, all_externs):
+                return
+            dce_body = [st for st in s.body if not self._stmt_uses_unbound_extern(st, all_externs)]
+            dce_else = None
+            if s.else_body:
+                dce_else = [st for st in s.else_body if not self._stmt_uses_unbound_extern(st, all_externs)]
+            patched = IfStmt(s.cond, dce_body, dce_else)
+            self._stmt(patched)
+        else:
+            self._stmt(s)
+
+    def _cond_uses_unbound_extern(self, cond, all_externs):
+        refs = self._cond_refs_names(cond)
+        for name in refs:
+            if name in all_externs and not self._is_extern_bound(name):
+                return True
+        return False
 
     def R_asm(self, tok, bindings):
         if tok in bindings:

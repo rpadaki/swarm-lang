@@ -145,8 +145,8 @@ def _compile_source(src: str, source_dir: Path | None = None):
     errors = []
     try:
         prog = Parser(tokenize(src)).parse_program()
-        prog, packages = resolve_imports(prog, source_dir)
-        Compiler(packages).compile(prog)
+        prog, packages, pkg_externs = resolve_imports(prog, source_dir)
+        Compiler(packages, pkg_externs).compile(prog)
     except SyntaxError as e:
         line = _extract_line(str(e))
         errors.append((line, str(e)))
@@ -159,7 +159,7 @@ def _compile_source(src: str, source_dir: Path | None = None):
 def _lint_source(src: str, source_dir: Path | None = None):
     try:
         prog = Parser(tokenize(src)).parse_program()
-        prog, _packages = resolve_imports(prog, source_dir)
+        prog, _packages, _pkg_externs = resolve_imports(prog, source_dir)
         warnings = check(prog)
         results = []
         for w in warnings:

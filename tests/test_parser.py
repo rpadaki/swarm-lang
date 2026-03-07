@@ -6,9 +6,9 @@ from swarm.tokenizer import tokenize
 from swarm.parser import Parser
 from swarm.ast import (
     ActionStmt, Assignment, BinExpr, Become, BehaviorDef, CallExpr, Const,
-    ExportConst, ExportFunc, FuncCall, FuncDef, IfStmt, Import, InitBlock,
-    LoopStmt, MatchCase, MatchStmt, PackageDecl, RegDecl, StateBlock,
-    StateFromBehavior, UsingDecl, WhileStmt, BoolDecl, TagDecl,
+    ExportConst, ExportFunc, ExternRegDecl, FuncCall, FuncDef, IfStmt,
+    Import, InitBlock, LoopStmt, MatchCase, MatchStmt, PackageDecl, RegDecl,
+    StateBlock, StateFromBehavior, UsingDecl, WhileStmt, BoolDecl, TagDecl,
 )
 
 
@@ -201,6 +201,56 @@ class TestFuncDef(unittest.TestCase):
         self.assertEqual(ef.ret, "result")
         self.assertTrue(ef.exported)
 
+    def test_stable_return_default(self):
+        prog = parse("export func f() -> result { x = 1 }")
+        ef = prog[0]
+        self.assertIsInstance(ef, ExportFunc)
+        self.assertEqual(ef.ret, "result")
+        self.assertFalse(ef.is_volatile)
+        self.assertIsNone(ef.stable_predicate)
+
+    def test_volatile_return(self):
+        prog = parse("export func f() -> volatile result { x = 1 }")
+        ef = prog[0]
+        self.assertIsInstance(ef, ExportFunc)
+        self.assertEqual(ef.ret, "result")
+        self.assertTrue(ef.is_volatile)
+        self.assertIsNone(ef.stable_predicate)
+
+    def test_volatile_return_with_stable_predicate(self):
+        prog = parse("export func f(x) -> volatile result stable(x == 1) { x = 1 }")
+        ef = prog[0]
+        self.assertIsInstance(ef, ExportFunc)
+        self.assertEqual(ef.ret, "result")
+        self.assertTrue(ef.is_volatile)
+        self.assertEqual(ef.stable_predicate, "x == 1")
+
+    def test_volatile_return_with_or_predicate(self):
+        prog = parse("export func f(t) -> volatile result stable(t == WALL || t == NEST) { x = 1 }")
+        ef = prog[0]
+        self.assertTrue(ef.is_volatile)
+        self.assertEqual(ef.stable_predicate, "t == WALL || t == NEST")
+
+    def test_volatile_return_with_result_predicate(self):
+        prog = parse("export func f(d) -> volatile result stable(result == WALL || result == NEST) { x = 1 }")
+        ef = prog[0]
+        self.assertTrue(ef.is_volatile)
+        self.assertEqual(ef.stable_predicate, "result == WALL || result == NEST")
+
+    def test_non_export_func_volatile(self):
+        prog = parse("func sense(target) -> volatile result { x = 1 }")
+        ef = prog[0]
+        self.assertIsInstance(ef, ExportFunc)
+        self.assertTrue(ef.is_volatile)
+        self.assertFalse(ef.exported)
+
+    def test_export_action_func_preserves_volatile(self):
+        prog = parse("export action func move(d) -> volatile result { x = 1 }")
+        ef = prog[0]
+        self.assertIsInstance(ef, ExportFunc)
+        self.assertTrue(ef.is_action)
+        self.assertTrue(ef.is_volatile)
+
 
 class TestImport(unittest.TestCase):
     def test_import(self):
@@ -346,6 +396,44 @@ class TestActionStmt(unittest.TestCase):
         stmt = prog[0].body[0]
         self.assertIsInstance(stmt, ActionStmt)
         self.assertEqual(stmt.func, "move")
+
+
+class TestExternRegDecl(unittest.TestCase):
+    def test_extern_register_single(self):
+        prog = parse("extern register dx")
+        self.assertEqual(len(prog), 1)
+        self.assertIsInstance(prog[0], ExternRegDecl)
+        self.assertEqual(prog[0].names, ["dx"])
+
+    def test_extern_register_multiple(self):
+        prog = parse("extern register dx, dy, last_dir")
+        self.assertEqual(len(prog), 1)
+        self.assertIsInstance(prog[0], ExternRegDecl)
+        self.assertEqual(prog[0].names, ["dx", "dy", "last_dir"])
+
+    def test_extern_register_in_package(self):
+        prog = parse("package ant\nextern register dx, dy\nexport const N = 1")
+        self.assertIsInstance(prog[0], PackageDecl)
+        self.assertIsInstance(prog[1], ExternRegDecl)
+        self.assertIsInstance(prog[2], ExportConst)
+
+
+class TestRegisterBinding(unittest.TestCase):
+    def test_register_with_binding(self):
+        prog = parse("register x(ant.dx)")
+        self.assertIsInstance(prog[0], RegDecl)
+        self.assertEqual(prog[0].names, ["x"])
+        self.assertEqual(prog[0].bindings, {"x": "ant.dx"})
+
+    def test_register_mixed_bindings(self):
+        prog = parse("register x(ant.dx), y(ant.dy), tmp")
+        self.assertIsInstance(prog[0], RegDecl)
+        self.assertEqual(prog[0].names, ["x", "y", "tmp"])
+        self.assertEqual(prog[0].bindings, {"x": "ant.dx", "y": "ant.dy"})
+
+    def test_register_without_binding(self):
+        prog = parse("register a, b, c")
+        self.assertEqual(prog[0].bindings, {})
 
 
 if __name__ == "__main__":

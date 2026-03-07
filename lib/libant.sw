@@ -1,5 +1,7 @@
 package ant
 
+extern register dx, dy, last_dir
+
 // libant — standard ant operations
 //
 // Provides constants, sensing, pheromone marking, and utility functions.
@@ -34,22 +36,22 @@ export const CH_YELLOW = CH_YELLOW
 // ── Sensing ──────────────────────────────────────────────────
 
 // Returns direction (N=1, E=2, S=3, W=4) to nearest cell of type, or 0.
-export func sense(target) -> result {
+export func sense(target) -> volatile result stable(target == WALL || target == NEST) {
     asm { SENSE target result }
 }
 
 // Returns cell type at direction: EMPTY (0), WALL (1), FOOD (2), NEST (3).
-export func probe(direction) -> result {
+export func probe(direction) -> volatile result stable(result == WALL || result == NEST) {
     asm { PROBE direction result }
 }
 
 // Returns direction of strongest pheromone on channel, or 0.
-export func smell(channel) -> result {
+export func smell(channel) -> volatile result {
     asm { SMELL channel result }
 }
 
 // Returns pheromone intensity (0-255) on channel at direction.
-export func sniff(channel, direction) -> result {
+export func sniff(channel, direction) -> volatile result {
     asm { SNIFF channel direction result }
 }
 
