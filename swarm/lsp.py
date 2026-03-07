@@ -774,6 +774,14 @@ def hover(params: lsp.HoverParams):
 
     sd = _source_dir(params.text_document.uri)
 
+    # Skip hover inside comments
+    stripped = line.lstrip()
+    if stripped.startswith("//"):
+        return None
+    comment_pos = line.find("//")
+    if comment_pos >= 0 and col >= comment_pos:
+        return None
+
     # Skip hover inside import strings
     import_match = re.match(r'\s*import\s+"([^"]+)"', line)
     if import_match:
