@@ -11,7 +11,7 @@ version = "0.7.0"
 
 [grammars.swarm]
 repository = "https://github.com/rpadaki/tree-sitter-swarm"
-rev = "612d47732c6d940ed36a6fcd7704bbf7545042e6"
+rev = "b0475071b162d1ce47a5dd182e52f10ae3e84bba"
 
 [language_servers.swarm-lsp]
 language = "Swarm"
