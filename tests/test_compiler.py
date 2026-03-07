@@ -115,6 +115,39 @@ state s { move(RANDOM) become s }
         out = compile_src(src)
         self.assertIn("SET r2 42", out)
 
+    def test_const_folding(self):
+        src = """\
+import "ant"
+using ant
+const A = 10
+const B = 3
+register x
+state s {
+    x = A + B
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertIn("SET r1 13", out)
+        self.assertNotIn("ADD", out)
+
+    def test_const_folding_nested(self):
+        src = """\
+import "ant"
+using ant
+const A = 10
+const B = 3
+register x
+state s {
+    x = A * B + 2
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertIn("SET r1 32", out)
+
     def test_asm_opcode_not_resolved_as_const(self):
         """RANDOM instruction in asm blocks must not be resolved to the RANDOM constant."""
         src = """\

@@ -365,7 +365,37 @@ class Compiler:
         tgt = self.R(s.target)
         self._compile_expr_into(tgt, s.expr)
 
+    _FOLD_OPS = {
+        "+": lambda a, b: a + b, "-": lambda a, b: a - b,
+        "*": lambda a, b: a * b, "/": lambda a, b: a // b if b else 0,
+        "%": lambda a, b: a % b if b else 0,
+        "&": lambda a, b: a & b, "|": lambda a, b: a | b, "^": lambda a, b: a ^ b,
+        "<<": lambda a, b: a << b, ">>": lambda a, b: a >> b,
+    }
+
+    def _try_fold(self, expr):
+        """Try to evaluate an expression to a constant int. Returns str or None."""
+        if isinstance(expr, str):
+            val = self.R(expr)
+            try:
+                int(val)
+                return val
+            except ValueError:
+                return None
+        if isinstance(expr, BinExpr):
+            l = self._try_fold(expr.left)
+            r = self._try_fold(expr.right)
+            if l is not None and r is not None:
+                fn = self._FOLD_OPS.get(expr.op)
+                if fn:
+                    return str(fn(int(l), int(r)))
+        return None
+
     def _compile_expr_into(self, tgt, expr):
+        folded = self._try_fold(expr)
+        if folded is not None:
+            if tgt != folded: self.emit(f"  SET {tgt} {folded}")
+            return
         if isinstance(expr, str):
             val = self.R(expr)
             if tgt != val: self.emit(f"  SET {tgt} {val}")
