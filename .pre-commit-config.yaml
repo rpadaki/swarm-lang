@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: tree-sitter-generate
+        name: regenerate tree-sitter parser
+        entry: bash -c 'cd parsers/tree-sitter-swarm && bun run generate && git add src/'
+        language: system
+        files: parsers/tree-sitter-swarm/grammar.js
+        pass_filenames: false
