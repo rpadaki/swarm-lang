@@ -773,6 +773,15 @@ def hover(params: lsp.HoverParams):
     col = params.position.character
 
     sd = _source_dir(params.text_document.uri)
+
+    # Skip hover inside import strings
+    import_match = re.match(r'\s*import\s+"([^"]+)"', line)
+    if import_match:
+        str_start = line.index(f'"{import_match.group(1)}"')
+        str_end = str_start + len(import_match.group(1)) + 2
+        if str_start <= col <= str_end:
+            return None
+
     symbols = _collect_symbols(doc.source, sd)
 
     # Qualified name hover: pkg.member
@@ -948,22 +957,26 @@ def definition(params: lsp.DefinitionParams):
         str_end = str_start + len(imp_path) + 2
         if str_start <= col <= str_end:
             resolved = _find_module(imp_path, sd)
-            target_uri = None
             if resolved:
                 if resolved.is_dir():
                     sw_files = sorted(resolved.glob("*.sw"))
                     if sw_files:
-                        target_uri = f"file://{sw_files[0]}"
+                        return lsp.Location(
+                            uri=f"file://{sw_files[0]}",
+                            range=lsp.Range(
+                                start=lsp.Position(line=0, character=0),
+                                end=lsp.Position(line=0, character=0),
+                            ),
+                        )
                 else:
-                    target_uri = f"file://{resolved}"
-            if target_uri:
-                return lsp.Location(
-                    uri=target_uri,
-                    range=lsp.Range(
-                        start=lsp.Position(line=0, character=0),
-                        end=lsp.Position(line=0, character=0),
-                    ),
-                )
+                    return lsp.Location(
+                        uri=f"file://{resolved}",
+                        range=lsp.Range(
+                            start=lsp.Position(line=0, character=0),
+                            end=lsp.Position(line=0, character=0),
+                        ),
+                    )
+            return None
 
     # Cmd+click on `using <name>` → open the package
     using_match = re.match(r'\s*using\s+(\w+)', line)
