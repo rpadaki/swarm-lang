@@ -115,6 +115,43 @@ state s { move(RANDOM) become s }
         out = compile_src(src)
         self.assertIn("SET r2 42", out)
 
+    def test_asm_opcode_not_resolved_as_const(self):
+        """RANDOM instruction in asm blocks must not be resolved to the RANDOM constant."""
+        src = """\
+import "ant"
+using ant
+register x
+state s {
+    x = rand(4)
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertIn("RANDOM r1 4", out)
+
+
+class TestExprCodegen(unittest.TestCase):
+    def test_zero_minus_register(self):
+        """0 - x must not clobber x before the SUB."""
+        src = """\
+import "ant"
+using ant
+register scratch
+state s {
+    scratch = 0 - scratch
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        lines = out.split("\n")
+        sub_lines = [l.strip() for l in lines if "SUB" in l]
+        for l in sub_lines:
+            parts = l.split()
+            self.assertNotEqual(parts[1], parts[2],
+                                f"SUB operands are the same register: {l}")
+
 
 class TestConditionCodegen(unittest.TestCase):
     def test_if_become_compiles_to_jeq(self):
@@ -131,6 +168,63 @@ state s {
 """
         out = compile_src(src)
         self.assertIn("JEQ", out)
+
+    def test_gte_no_else(self):
+        src = """\
+import "ant"
+using ant
+register x
+state s {
+    if x >= 5 { x = 0 }
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertIn("JLT", out)
+        self.assertNotIn("bad cond", out)
+
+    def test_lte_no_else(self):
+        src = """\
+import "ant"
+using ant
+register x
+state s {
+    if x <= 5 { x = 0 }
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertIn("JGT", out)
+
+    def test_gte_with_else(self):
+        src = """\
+import "ant"
+using ant
+register x
+state s {
+    if x >= 5 { x = 0 } else { x = 1 }
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertNotIn("bad cond", out)
+
+    def test_gte_become(self):
+        src = """\
+import "ant"
+using ant
+register x
+state s {
+    if x >= 5 { become s }
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertNotIn("bad cond", out)
 
 
 class TestBehaviorExpansion(unittest.TestCase):

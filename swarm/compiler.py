@@ -373,12 +373,19 @@ class Compiler:
             self._call_expr(tgt, expr)
         elif isinstance(expr, BinExpr):
             op = BINOP.get(expr.op)
-            self._compile_expr_into(tgt, expr.left)
             if isinstance(expr.right, (BinExpr, CallExpr)):
                 self._compile_expr_into("r0", expr.right)
+                self._compile_expr_into(tgt, expr.left)
                 self.emit(f"  {op} {tgt} r0")
             else:
-                self.emit(f"  {op} {tgt} {self.R(expr.right)}")
+                rhs = self.R(expr.right)
+                if rhs == tgt:
+                    self.emit(f"  SET r0 {rhs}")
+                    self._compile_expr_into(tgt, expr.left)
+                    self.emit(f"  {op} {tgt} r0")
+                else:
+                    self._compile_expr_into(tgt, expr.left)
+                    self.emit(f"  {op} {tgt} {rhs}")
 
     def _call_expr(self, tgt, e):
         ef = self._resolve_efunc(e.func)
@@ -530,7 +537,7 @@ class Compiler:
         return tok
 
     def _asm_block(self, tokens, bindings):
-        resolved = [self.R_asm(t, bindings) for t in tokens]
+        resolved = [tokens[0]] + [self.R_asm(t, bindings) for t in tokens[1:]]
         self.emit(f"  {' '.join(resolved)}")
 
     def _action(self, s):
@@ -558,6 +565,22 @@ class Compiler:
         return body[0].target if len(body) == 1 and isinstance(body[0], Become) else None
 
     def _if(self, s):
+        # Normalize >= and <= by inverting to < and > with swapped branches
+        if s.cond[1] in (">=", "<="):
+            inv_op = "<" if s.cond[1] == ">=" else ">"
+            if s.else_body:
+                s = IfStmt((s.cond[0], inv_op, s.cond[2]), s.else_body, s.body)
+            else:
+                # if x >= y { A } → if x < y {} else { A } → just skip A when x < y
+                s = IfStmt((s.cond[0], inv_op, s.cond[2]), [], s.body)
+                # Optimize: empty body with else → use non-inverted jump to skip else
+                l, op, r = self._eval_cond(s.cond)
+                j = COND_JMP.get(op)
+                end = self.L("fi")
+                self.emit(f"  {j} {l} {r} {end}")
+                for st in s.else_body: self._stmt(st)
+                self.emit_lbl(end)
+                return
         l, op, r = self._eval_cond(s.cond)
         j = COND_JMP.get(op)
         if not j: raise RuntimeError(f"bad cond: {op}")
@@ -590,8 +613,16 @@ class Compiler:
         self.loops.append((brk, top))
         self.emit_lbl(top)
         l, op, r = self._eval_cond(s.cond)
-        j = COND_JMP.get(op)
-        self.emit(f"  {j} {l} {r} {body}"); self.emit(f"  JMP {brk}")
+        if op == ">=":
+            self.emit(f"  JGT {l} {r} {body}")
+            self.emit(f"  JEQ {l} {r} {body}")
+        elif op == "<=":
+            self.emit(f"  JLT {l} {r} {body}")
+            self.emit(f"  JEQ {l} {r} {body}")
+        else:
+            j = COND_JMP.get(op)
+            self.emit(f"  {j} {l} {r} {body}")
+        self.emit(f"  JMP {brk}")
         self.emit_lbl(body)
         for st in s.body: self._stmt(st)
         self.emit(f"  JMP {top}"); self.emit_lbl(brk)
