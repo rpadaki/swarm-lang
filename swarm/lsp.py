@@ -5,7 +5,7 @@ Provides diagnostics, completions, formatting, hover, semantic tokens,
 document symbols, and go-to-definition for .sw files.
 
 Usage:
-    uv run python -m swarm lsp          # start LSP on stdio
+    uv run swarm lsp          # start LSP on stdio
 """
 
 import re

@@ -9,9 +9,9 @@ Features:
 - Outputs flat .ant file ready to paste
 
 Usage:
-    uv run python -m swarm antssembly programs/v3.ant --copy     # compile + pbcopy
-    uv run python -m swarm antssembly programs/v3.ant --analyze   # analyze only
-    uv run python -m swarm antssembly programs/v3.ant             # print to stdout
+    uv run swarm antssembly programs/v3.ant --copy     # compile + pbcopy
+    uv run swarm antssembly programs/v3.ant --analyze   # analyze only
+    uv run swarm antssembly programs/v3.ant             # print to stdout
 """
 
 import sys
@@ -269,7 +269,7 @@ def warn(msg):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python -m swarm antssembly <source.ant> [--analyze] [--copy] [--strip]", file=sys.stderr)
+        print("Usage: swarm antssembly <source.ant> [--analyze] [--copy] [--strip]", file=sys.stderr)
         print("  --analyze  Run static analysis", file=sys.stderr)
         print("  --copy     Copy output to clipboard (pbcopy)", file=sys.stderr)
         print("  --strip    Remove comments and blank lines", file=sys.stderr)

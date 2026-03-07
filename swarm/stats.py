@@ -5,7 +5,7 @@ Counts states, behaviors, registers, total lines, and estimated antssembly
 instruction count (excluding .alias/.tag directives).
 
 Usage:
-    uv run python -m swarm stats program.sw
+    uv run swarm stats program.sw
 """
 
 import sys
@@ -94,7 +94,7 @@ def stats(path: Path):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python -m swarm stats <file.sw>", file=sys.stderr)
+        print("Usage: swarm stats <file.sw>", file=sys.stderr)
         sys.exit(1)
 
     path = Path(sys.argv[1])

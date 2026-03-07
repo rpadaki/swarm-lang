@@ -9,7 +9,7 @@ Parses using the compiler's Parser and checks for:
   - Stale reads (volatile-derived values used after a tick-consuming action)
 
 Usage:
-    uv run python -m swarm check program.sw
+    uv run swarm check program.sw
 """
 
 import re
@@ -452,7 +452,7 @@ def check(prog):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python -m swarm check <file.sw>", file=sys.stderr)
+        print("Usage: swarm check <file.sw>", file=sys.stderr)
         sys.exit(1)
 
     path = Path(sys.argv[1])

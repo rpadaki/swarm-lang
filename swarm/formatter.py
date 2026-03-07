@@ -6,8 +6,8 @@ Re-indents consistently (4 spaces per nesting level), normalizes whitespace
 preserves comments.
 
 Usage:
-    uv run python -m swarm fmt program.sw             # prints to stdout
-    uv run python -m swarm fmt program.sw --in-place   # overwrites file
+    uv run swarm fmt program.sw             # prints to stdout
+    uv run swarm fmt program.sw --in-place   # overwrites file
 """
 
 import re
@@ -163,7 +163,7 @@ def format_sw(src: str) -> str:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python -m swarm fmt <file.sw> [--in-place]", file=sys.stderr)
+        print("Usage: swarm fmt <file.sw> [--in-place]", file=sys.stderr)
         sys.exit(1)
 
     path = Path(sys.argv[1])
