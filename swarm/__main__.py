@@ -1,91 +1,86 @@
-"""CLI entry point: uv run swarm [subcommand] [args]
+"""Swarm Language compiler toolchain."""
 
-Subcommands:
-    compile   Compile a .sw file to antssembly (default)
-    check     Lint a .sw file
-    fmt       Format a .sw file
-    stats     Print stats about a .sw file
-    lsp       Start the LSP server
-    antssembly  Preprocess a .ant file
-"""
-
+import argparse
 import sys
 
 
-HELP = """\
-Usage: swarm <file.sw | subcommand> [args]
-
-Commands:
-  compile <file.sw>     Compile .sw to antssembly (default if given a .sw file)
-  check <file.sw>       Lint / check for warnings
-  fmt <file.sw>         Format (--in-place to overwrite)
-  stats <file.sw>       Print program statistics
-  lsp                   Start the LSP server
-  antssembly <file.ant> Preprocess a .ant file
-
-Compile options:
-  -o <out.ant>          Write output to file
-  --copy                Copy output to clipboard (pbcopy)
-  -O0                   Disable all optimizations
-  -s, --strip           Remove debug symbols (aliases, tags, state names)
-"""
-
-
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
-        print(HELP, end="", file=sys.stderr)
-        sys.exit(0 if len(sys.argv) > 1 else 1)
-    if sys.argv[1] in ("-V", "--version", "version"):
-        print("swarm 0.1.0")
-        sys.exit(0)
+    parser = argparse.ArgumentParser(
+        prog="swarm",
+        description="Swarm Language compiler toolchain",
+    )
+    parser.add_argument("-V", "--version", action="version", version="swarm 0.1.0")
+    sub = parser.add_subparsers(dest="command")
 
-    subcommand = sys.argv[1]
+    # compile (also the default when a .sw file is passed directly)
+    p_compile = sub.add_parser("compile", help="Compile .sw to antssembly")
+    _add_compile_args(p_compile)
 
-    if subcommand == "check":
-        sys.argv = sys.argv[1:]  # shift so check sees [check, file, ...]
-        from .linter import main as check_main
-        check_main()
-    elif subcommand == "fmt":
-        sys.argv = sys.argv[1:]
-        from .formatter import main as fmt_main
-        fmt_main()
-    elif subcommand == "stats":
-        sys.argv = sys.argv[1:]
-        from .stats import main as stats_main
-        stats_main()
-    elif subcommand == "lsp":
+    # check
+    p_check = sub.add_parser("check", help="Lint / check for warnings")
+    p_check.add_argument("file", help=".sw file to check")
+
+    # fmt
+    p_fmt = sub.add_parser("fmt", help="Format a .sw file")
+    p_fmt.add_argument("file", help=".sw file to format")
+    p_fmt.add_argument("--in-place", action="store_true", help="Overwrite file in place")
+
+    # stats
+    p_stats = sub.add_parser("stats", help="Print program statistics")
+    p_stats.add_argument("file", help=".sw file to analyze")
+
+    # lsp
+    sub.add_parser("lsp", help="Start the LSP server")
+
+    # antssembly
+    p_asm = sub.add_parser("antssembly", help="Preprocess a .ant file")
+    p_asm.add_argument("file", help=".ant file to preprocess")
+    p_asm.add_argument("--copy", action="store_true", help="Copy output to clipboard")
+    p_asm.add_argument("--analyze", action="store_true", help="Analyze only")
+    p_asm.add_argument("--strip", action="store_true", help="Strip comments and aliases")
+
+    # If first arg looks like a .sw file, treat as implicit compile
+    if len(sys.argv) > 1 and sys.argv[1].endswith(".sw") and not sys.argv[1].startswith("-"):
+        sys.argv.insert(1, "compile")
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif args.command == "compile":
+        _compile(args)
+    elif args.command == "check":
+        _check(args)
+    elif args.command == "fmt":
+        _fmt(args)
+    elif args.command == "stats":
+        _stats(args)
+    elif args.command == "lsp":
         from .lsp import main as lsp_main
         lsp_main()
-    elif subcommand == "antssembly":
-        sys.argv = sys.argv[1:]
-        from .antssembly import main as asm_main
-        asm_main()
-    elif subcommand == "compile":
-        sys.argv = sys.argv[1:]
-        _compile()
-    else:
-        _compile()
+    elif args.command == "antssembly":
+        _antssembly(args)
 
 
-def _compile():
+def _add_compile_args(p):
+    p.add_argument("file", help=".sw file to compile")
+    p.add_argument("-o", "--output", metavar="FILE", help="Write output to file")
+    p.add_argument("--copy", action="store_true", help="Copy output to clipboard (pbcopy)")
+    p.add_argument("-O0", dest="no_opt", action="store_true", help="Disable all optimizations")
+    p.add_argument("-s", "--strip", action="store_true", help="Remove debug symbols")
+
+
+def _compile(args):
     from pathlib import Path
     from .tokenizer import tokenize
     from .parser import Parser
     from .compiler import Compiler, resolve_imports
     from .optimize import OptConfig, OPT_NONE
 
-    if len(sys.argv) < 2:
-        print("Usage: swarm <file.sw> [--copy] [-o out.ant] [-O0]", file=sys.stderr)
-        sys.exit(1)
-    src = Path(sys.argv[1])
-    do_copy = "--copy" in sys.argv
-    out_file = None
-    if "-o" in sys.argv: out_file = Path(sys.argv[sys.argv.index("-o") + 1])
-
-    opt = None  # default: all optimizations
-    if "-O0" in sys.argv:
-        opt = OPT_NONE
-    if "--strip" in sys.argv or "-s" in sys.argv:
+    src = Path(args.file)
+    opt = OPT_NONE if args.no_opt else None
+    if args.strip:
         if opt is None:
             opt = OptConfig()
         opt.strip = True
@@ -94,15 +89,68 @@ def _compile():
     prog, packages, pkg_externs = resolve_imports(prog, src.parent)
     output = Compiler(packages, pkg_externs, opt=opt).compile(prog)
 
-    if out_file:
+    if args.output:
+        out_file = Path(args.output)
         out_file.write_text(output + "\n")
         print(f"Wrote {out_file}", file=sys.stderr)
-    elif do_copy:
+    elif args.copy:
         import subprocess
         subprocess.run(["pbcopy"], input=output.encode(), check=True)
         print("Copied!", file=sys.stderr)
     else:
         print(output)
+
+
+def _check(args):
+    from pathlib import Path
+    from .tokenizer import tokenize
+    from .parser import Parser
+    from .compiler import resolve_imports
+    from .linter import check
+
+    path = Path(args.file)
+    prog = Parser(tokenize(path.read_text())).parse_program()
+    try:
+        prog, _packages, _pkg_externs = resolve_imports(prog, source_dir=path.parent)
+    except SyntaxError as e:
+        print(f"warning: {e}", file=sys.stderr)
+    warns = check(prog)
+    if warns:
+        for w in warns:
+            print(f"warning: {w}", file=sys.stderr)
+    else:
+        print(f"{path}: ok (no warnings)", file=sys.stderr)
+
+
+def _fmt(args):
+    from pathlib import Path
+    from .formatter import format_sw
+
+    path = Path(args.file)
+    formatted = format_sw(path.read_text())
+    if args.in_place:
+        path.write_text(formatted)
+        print(f"Formatted {path}", file=sys.stderr)
+    else:
+        sys.stdout.write(formatted)
+
+
+def _stats(args):
+    sys.argv = ["stats", args.file]
+    from .stats import main as stats_main
+    stats_main()
+
+
+def _antssembly(args):
+    sys.argv = ["antssembly", args.file]
+    if args.copy:
+        sys.argv.append("--copy")
+    if args.analyze:
+        sys.argv.append("--analyze")
+    if args.strip:
+        sys.argv.append("--strip")
+    from .antssembly import main as asm_main
+    asm_main()
 
 
 if __name__ == "__main__":
