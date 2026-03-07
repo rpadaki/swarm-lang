@@ -418,11 +418,12 @@ class TestDCEPass(unittest.TestCase):
         ]
         result = dce(lines)
         self.assertIn("  SET r1 0", result)
-        self.assertIn("  JMP done", result)
         self.assertNotIn("  SET r2 1", result)
         self.assertNotIn("  SET r3 2", result)
         self.assertIn("done:", result)
         self.assertIn("  SET r4 3", result)
+        # JMP done -> done: is a fallthrough, so JMP is eliminated
+        self.assertNotIn("  JMP done", result)
 
     def test_noop_set_removed(self):
         from swarm.optimize.dce import dce
@@ -450,13 +451,78 @@ class TestDCEPass(unittest.TestCase):
         lines = [
             "  JMP a",
             "  SET r1 0",
-            "b:",
+            "a:",
             "  SET r2 1",
+            "b:",
+            "  SET r3 2",
         ]
         result = dce(lines)
         self.assertNotIn("  SET r1 0", result)
-        self.assertIn("b:", result)
+        self.assertIn("a:", result)
         self.assertIn("  SET r2 1", result)
+        # b: is a user label (no __ prefix), preserved even if unreferenced
+        self.assertIn("b:", result)
+
+    def test_dead_unreferenced_label_removed(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "  JMP a",
+            "__dead_label:",
+            "  SET r1 0",
+            "a:",
+            "  SET r2 1",
+        ]
+        result = dce(lines)
+        self.assertNotIn("__dead_label:", result)
+        self.assertNotIn("  SET r1 0", result)
+        self.assertIn("a:", result)
+
+    def test_jmp_to_next_label_removed(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "  SET r1 0",
+            "  JMP __L_1",
+            "__L_1:",
+            "  SET r2 1",
+        ]
+        result = dce(lines)
+        self.assertNotIn("  JMP __L_1", result)
+        self.assertIn("  SET r2 1", result)
+
+    def test_jmp_to_next_label_kept_when_different(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "  JMP other",
+            "__L_1:",
+            "  SET r2 1",
+        ]
+        result = dce(lines)
+        self.assertIn("  JMP other", result)
+
+    def test_unreferenced_internal_label_removed(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "  JMP a",
+            "a:",
+            "  SET r1 0",
+            "__orphan:",
+            "  SET r2 1",
+        ]
+        result = dce(lines)
+        self.assertNotIn("__orphan:", result)
+        self.assertIn("a:", result)
+
+    def test_user_labels_preserved(self):
+        from swarm.optimize.dce import dce
+        lines = [
+            "main:",
+            "  JMP search",
+            "search:",
+            "  SET r1 0",
+        ]
+        result = dce(lines)
+        self.assertIn("main:", result)
+        self.assertIn("search:", result)
 
 
 if __name__ == "__main__":
