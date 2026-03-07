@@ -1,94 +1,194 @@
 # Swarm Language Specification
 
-A structured language for the SWARM Ant Colony Optimization Challenge.
-Compiles to antssembly via `uv run python -m swarm <file.sw>`.
+Swarm is a state-machine language for the SWARM Ant Colony Optimization Challenge.
+It compiles to antssembly, the challenge's assembly format. Each ant runs the same
+program. Ants communicate only through pheromone trails on a 128x128 grid.
 
-## Overview
+Design principles:
 
-Swarm Language is a state-machine-first language designed for writing ant brains.
-Each ant runs the same program. Ants communicate only through pheromone trails
-marked on the grid. The language compiles to antssembly (the challenge's assembly
-format) with automatic coordinate tracking and state dispatch.
-
-Key design principles:
-- **No gotos.** State machines with `become` (instant) and `->` (post-action) transitions.
-- **Auto-tagging.** States automatically get heatmap tags for debugging.
-- **Reusable behaviors.** Abstract state templates with named exit points.
-- **Minimal boilerplate.** Coord tracking and dispatch are auto-generated.
+- **State machines.** Programs are collections of named states with `become` transitions.
+- **Package system.** Libraries export functions and constants; user programs import and bind registers.
+- **Action/instant separation.** Tick-consuming functions (`action func`) are distinct from instant operations.
+- **Automatic optimizations.** Dead code elimination, coordinate tracking, and state dispatch are compiler-managed.
 
 ## Program Structure
 
 A `.sw` file contains top-level declarations in any order:
 
 ```
-const NAME = VALUE       // compile-time constant
-register a, b, c, ...   // allocate named registers (max 8 total)
-tag [N] name             // explicit heatmap tag (optional — states auto-tag)
+package name               // library package declaration
+import "name"              // import a library
+using name                 // bring package exports into scope
 
-behavior name { ... }    // reusable state template
-state name { ... }       // concrete state
-state name = beh { ... } // state instantiated from a behavior
+const NAME = VALUE         // compile-time constant
+register (...)             // allocate named registers with bindings
+tag [N] name               // explicit heatmap tag
+bool a, b, c               // packed boolean flags (1 register, up to 15 flags)
 
-func name() { ... }      // inline function (expanded at call sites)
-init { ... }             // runs once at startup, before any state
+state name { ... }         // concrete state
+state name = beh { ... }   // state instantiated from a behavior
+behavior name { ... }      // reusable state template
+func name() { ... }        // inline function (no params, no return)
+init { ... }               // runs once at startup
 ```
+
+## Packages
+
+### Declaring a package
+
+Library files declare a package name at the top:
+
+```
+package ant
+```
+
+### Exporting
+
+Libraries export constants and functions with the `export` keyword:
+
+```
+export const N = 1
+export func sense(target) -> volatile result { ... }
+export action func move(direction) { ... }
+```
+
+### Importing
+
+User programs import libraries by name. The compiler searches for `<name>.sw` and
+`lib<name>.sw` in the source directory and the `lib/` directory:
+
+```
+import "libant"
+```
+
+This makes the package's exports available via qualified references (`ant.move()`,
+`ant.N`). The package name comes from the `package` declaration inside the library
+file, not from the import path.
+
+### Using
+
+`using` brings a package's exported functions and constants into unqualified scope:
+
+```
+using ant
+```
+
+After this, `move()` and `N` can be used without the `ant.` prefix.
+
+`using` imports functions and constants only -- not registers. Register binding
+is always explicit via the register block.
 
 ## Registers
 
-Ants have 8 general-purpose 32-bit signed registers (`r0`–`r7`).
-Declare them with `register`:
+Ants have 8 general-purpose 32-bit signed registers (`r0`-`r7`). Register `r0` is
+reserved by the compiler as a scratch register and is never exposed to user code.
+This leaves 7 user-allocatable registers (`r1`-`r7`).
+
+### Register blocks
+
+Registers are declared in a parenthesized block with optional bindings and initializers:
 
 ```
-register scratch, dir, mark_str, dx, dy, next_st, last_dir, tmp
+register (
+    dir
+    x(ant.dx) = 0
+    y(ant.dy) = 0
+    heading(ant.last_dir) = id() % 4 + 1
+    mark_str = GREEN_START
+    next_st
+    tmp
+)
 ```
 
-This assigns `scratch=r0`, `dir=r1`, etc. in order. The names `dx`, `dy`,
-and `last_dir` are special — the compiler uses them for automatic coordinate
-tracking and direction bookkeeping.
+Each entry has the form:
+
+```
+name                       // plain register
+name(pkg.extern)           // bind to an extern register from a package
+name = expr                // with initializer (runs before init block)
+name(pkg.extern) = expr    // binding + initializer
+```
+
+Bindings connect user registers to `extern register` declarations in libraries.
+When a library function references `dx`, and the user has declared `x(ant.dx)`,
+the compiler maps `dx` to the same physical register as `x`.
+
+The comma-separated flat syntax is also supported:
+
+```
+register dir, mark_str, dx, dy, next_st, last_dir, tmp
+```
+
+Register initializers are compiled into the program entry point, before the `init`
+block body.
+
+### Special register names
+
+The names `next_st`, `next_state`, or `next` are recognized by the compiler for
+state dispatch after actions. One of these should be declared if the program has
+multiple states.
+
+## Extern Registers
+
+Libraries declare registers they reference but do not own:
+
+```
+extern register dx, dy, last_dir
+```
+
+Extern registers are placeholders. They are bound by the importing program's
+register block (e.g., `x(ant.dx)`). If an extern register is never bound, all
+code in the library that references it is eliminated by dead code elimination.
 
 ## Constants
 
 ```
-const GREEN_INT = 50
 const RED_START = 200
+const RED_DECAY = 3
 ```
 
-Constants are inlined at compile time. They can be used anywhere a value is expected.
+Constants are inlined at compile time wherever the name appears. In libraries,
+use `export const` to make them available to importers.
 
 ## States
 
-States are the core construct. Each state is a named block of code:
+States are the core construct. Each state is a named block of code that the ant
+executes:
 
 ```
 state search {
-    // ... body
+    if carrying() { become start_return }
+    if probe(HERE) == FOOD { become try_pickup }
+    move(RANDOM)
+    become search
 }
 ```
 
 ### Auto-tagging
 
-Every state automatically gets a heatmap tag (up to the 8-tag limit).
-The compiler emits `TAG <index>` at the start of each state body.
-No need for manual `tag` declarations or `set_tag()` at state entry.
+Every state automatically gets a heatmap tag (up to the 8-tag limit). The
+compiler emits `TAG <index>` at the start of each state body. Manual `tag`
+declarations can override or supplement this.
 
-### Transitions
+### Transitions with `become`
 
-There are two kinds of transitions:
+`become` is the only transition keyword. It performs an instant jump to another
+state (no tick consumed):
 
-**`become state`** — instant jump (no action consumed):
 ```
-if carrying() != 0 { become return_home }
-```
-
-**`action() -> state`** — transition after an action (MOVE/PICKUP/DROP):
-```
-move(E) -> search          // move east, then go to search state
-pickup() -> check_carry    // pick up food, then go to check_carry
-drop() -> reset_coords     // drop food, then go to reset_coords
+become search
+become try_pickup
 ```
 
-The `->` transitions go through the auto-generated `__post_move` dispatch,
-which updates `dx`/`dy` coordinates based on `last_dir`.
+Actions and transitions are always separate statements:
+
+```
+move(dir)
+become search
+```
+
+This replaces the old `move(dir) -> search` syntax. The `->` arrow is now used
+only in function return type annotations.
 
 ## Behaviors
 
@@ -96,8 +196,10 @@ Behaviors are reusable state templates with abstract exit points:
 
 ```
 behavior random_walk {
-    exit found_food       // abstract — wired at instantiation
+    exit found_food
     exit found_trail
+
+    if probe(HERE) == FOOD { become found_food }
 
     scratch = sense(FOOD)
     if scratch != 0 { become found_food }
@@ -105,17 +207,18 @@ behavior random_walk {
     scratch = smell(CH_RED)
     if scratch != 0 { become found_trail }
 
-    // momentum walk
     if last_dir != 0 {
         scratch = probe(last_dir)
         if scratch != WALL {
-            move(last_dir) -> self    // loop back to this state
+            move(last_dir)
+            become self
         }
     }
 
     dir = rand(4)
     dir = dir + 1
-    move(dir) -> self
+    move(dir)
+    become self
 }
 ```
 
@@ -123,141 +226,286 @@ Instantiate with concrete wiring:
 
 ```
 state exploring = random_walk {
-    found_food -> try_pickup
-    found_trail -> follow_red
+    found_food -> try_grab
+    found_trail -> follow_trail
 }
 ```
 
-The behavior body is inlined into the state. All `exit` names are replaced
-with their wired targets. `self` maps to the state's own name.
+The behavior body is inlined into the state. All `exit` names are replaced with
+their wired targets. `self` maps to the instantiating state's own name. Behaviors
+can also accept parameters:
 
-A behavior can have any number of exits. All exits must be wired.
+```
+behavior walk(threshold) { ... }
+state exploring = walk(10) { ... }
+```
 
 ## Init Block
 
 Runs once when the ant spawns, before entering any state:
 
 ```
-init {
-    dx = 0
-    dy = 0
-    last_dir = id()
-    last_dir = last_dir % 4
-    last_dir = last_dir + 1
+init { become search }
+```
+
+Register initializers execute before the init block body, so a simple `become`
+is often sufficient:
+
+```
+register (
+    x(ant.dx) = 0
+    y(ant.dy) = 0
+    heading(ant.last_dir) = id() % 4 + 1
+)
+
+init { become search }
+```
+
+## Functions
+
+### Inline functions
+
+Zero-parameter, no-return functions whose body is pasted at each call site:
+
+```
+func mark_green() {
+    mark(CH_GREEN, 50)
+}
+
+state search {
+    mark_green()
+    move(E)
     become search
 }
 ```
 
-## Actions
+### Export functions (efuncs)
 
-Actions consume the ant's tick. Only one action per tick.
-
-### move(direction) -> state
-
-Move in a direction. Automatically sets `last_dir` to the direction value.
+Parameterized functions defined in library packages. They support parameters,
+return values, `action` annotation, volatility annotations, and `local` temporaries:
 
 ```
-move(N) -> search       // move north
-move(scratch) -> search // move in direction stored in scratch
-move(RANDOM) -> search  // move randomly
-move(last_dir) -> search // continue same direction
+export func sense(target) -> volatile result stable(target == WALL || target == NEST) {
+    asm { SENSE target result }
+}
+
+export action func move(direction) {
+    asm { MOVE direction }
+}
+
+export func rand_range(lo, hi) -> result {
+    local range
+    range = hi - lo
+    asm { RANDOM result range }
+    result += lo
+}
 ```
 
-Directions: `N`/`NORTH` (1), `E`/`EAST` (2), `S`/`SOUTH` (3), `W`/`WEST` (4), `RANDOM`, `HERE`.
+#### `action func`
 
-### pickup() -> state
+Functions annotated with `action` consume the ant's tick. Only one action can
+execute per tick. The standard actions are `move`, `pickup`, and `drop`.
 
-Pick up food at the current cell:
 ```
-pickup() -> check_carry
-```
-
-### drop() -> state
-
-Drop carried food:
-```
-drop() -> reset_coords
+export action func move(direction) {
+    asm { MOVE direction }
+}
 ```
 
-## Non-action Statements
+When calling an action function, it is written as a statement:
 
-These don't consume a tick (up to 64 per tick before a forced action):
-
-### mark(channel, intensity)
-
-Mark pheromone (additive, capped at 255):
 ```
-mark(CH_GREEN, 50)
-mark(CH_RED, mark_str)
+move(dir)
+pickup()
+drop()
 ```
 
-Channels: `CH_RED`, `CH_BLUE`, `CH_GREEN`, `CH_YELLOW`.
+#### Return values
 
-### set_tag(name)
+Functions can declare a return value with `-> result`:
 
-Override the heatmap tag mid-state (for debugging sub-states):
 ```
-set_tag(stuck)     // reference a tag name or state name
+export func carrying() -> result {
+    asm { CARRYING result }
+}
 ```
 
-### Assignment
+The caller receives the return value by assigning the call to a register:
+
+```
+scratch = carrying()
+```
+
+#### `local`
+
+The `local` keyword declares compiler-assigned temporaries inside efuncs. These
+use the scratch register (`r0`) without exposing it to the library author:
+
+```
+export func rand_range(lo, hi) -> result {
+    local range
+    range = hi - lo
+    asm { RANDOM result range }
+    result += lo
+}
+```
+
+## Volatility and Stability
+
+Functions that read environmental state may return values that change between
+ticks. The volatility system tracks this to warn about stale reads.
+
+### `volatile`
+
+A function return annotated with `volatile` means its value may change after any
+action (tick boundary):
+
+```
+export func smell(channel) -> volatile result {
+    asm { SMELL channel result }
+}
+```
+
+### `stable(predicate)`
+
+A predicate can declare conditions under which a volatile return is actually
+stable (will not change between ticks):
+
+```
+export func probe(direction) -> volatile result stable(result == WALL || result == NEST) {
+    asm { PROBE direction result }
+}
+```
+
+The predicate can reference both parameters and the result. It is evaluated at
+compile time when arguments are constants; for register arguments, the compiler
+assumes volatile.
+
+### Stable returns
+
+Functions without `volatile` return stable values that never go stale:
+
+```
+export func carrying() -> result { ... }
+export func id() -> result { ... }
+```
+
+### Stale-read lint
+
+The linter tracks volatile-derived values across statements. When an action
+(tick-consuming function) executes, all volatile-derived registers become stale.
+Reading a stale register produces a warning:
+
+```
+dir = smell(CH_RED)    // dir is volatile
+move(dir)              // action: dir becomes stale
+if dir != 0 { ... }   // WARNING: stale read of 'dir'
+```
+
+## Assignments
+
+### Simple assignment
 
 ```
 scratch = 42              // literal
 scratch = other_reg       // register copy
-scratch = scratch + 1     // binary op (result goes to left operand's register)
-scratch = sense(FOOD)     // sense function
+scratch = sense(FOOD)     // function call
+scratch = a + b           // binary expression
 ```
 
-Binary operators: `+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `<<`, `>>`.
+### Compound assignments
 
-### Sense Functions
+Compound assignment operators desugar to `target = target op expr`:
 
-Read environmental information into a register:
+```
+mark_str -= 1             // mark_str = mark_str - 1
+x += dx                   // x = x + dx
+count *= 2                // count = count * 2
+```
 
-| Function | Returns |
-|---|---|
-| `sense(FOOD)` | Direction to nearest food (1-4) or 0 |
-| `sense(NEST)` | Direction to nest (1-4) or 0 |
-| `probe(dir)` | Cell type at direction: EMPTY(0), WALL(1), FOOD(2), NEST(3) |
-| `smell(channel)` | Direction of strongest pheromone (1-4) or 0 |
-| `sniff(channel, dir)` | Pheromone intensity at direction (0-255) |
-| `carrying()` | 1 if carrying food, 0 otherwise |
-| `id()` | Ant's unique ID (0-199) |
-| `rand(max)` | Random integer in [0, max) |
+Supported operators: `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`.
+
+### Condition assignments (`:=`)
+
+Inside `if` conditions, `:=` assigns and tests in one expression:
+
+```
+if dir := sense(FOOD) {
+    move(dir)
+    become try_pickup
+}
+```
+
+This is equivalent to:
+
+```
+dir = sense(FOOD)
+if dir != 0 {
+    move(dir)
+    become try_pickup
+}
+```
+
+## Operators
+
+### Binary operators
+
+Arithmetic and bitwise operators, listed by precedence (highest first):
+
+| Precedence | Operators | Description |
+|---|---|---|
+| 6 | `*` `/` `%` | Multiply, divide, modulo |
+| 5 | `+` `-` | Add, subtract |
+| 4 | `<<` `>>` | Left shift, right shift |
+| 3 | `&` | Bitwise AND |
+| 2 | `^` | Bitwise XOR |
+| 1 | `\|` | Bitwise OR |
+
+This follows C-style operator precedence. Parentheses can override precedence:
+
+```
+dir = (last_dir + 1) % 4 + 1
+tmp = ((last_dir + 1) % 4) + 1
+```
+
+### Comparison operators
+
+Used in `if` and `while` conditions: `==`, `!=`, `>`, `<`, `>=`, `<=`.
 
 ## Control Flow
 
 ### if / else
 
 ```
-if scratch != WALL {
-    move(dir) -> search
-}
+if carrying() { become start_return }
 
 if dx > 0 {
-    move(E) -> search
+    move(W)
+    become return_home
 } else {
-    move(W) -> search
+    move(E)
+    become return_home
 }
 
-if carrying() != 0 { become return_home }    // single-line peephole
+if dir := sense(FOOD) {
+    move(dir)
+    become try_pickup
+}
 ```
 
-Comparison operators: `==`, `!=`, `>`, `<`.
+Truthiness shorthand: `if expr { ... }` is equivalent to `if expr != 0 { ... }`.
 
 ### while
 
 ```
 tmp = 0
 while tmp < 4 {
-    scratch = probe(dir)
-    if scratch != WALL {
-        move(dir) -> search
+    if probe(dir) != WALL {
+        move(dir)
+        become search
     }
-    tmp = tmp + 1
-    scratch = dir % 4
-    dir = scratch + 1
+    tmp += 1
+    dir = dir % 4 + 1
 }
 ```
 
@@ -267,7 +515,7 @@ while tmp < 4 {
 loop {
     scratch = probe(dir)
     if scratch != WALL { break }
-    dir = dir + 1
+    dir += 1
 }
 ```
 
@@ -281,131 +529,265 @@ match probe(HERE) {
 }
 ```
 
-## Inline Functions
+## Inline Assembly
+
+### Block form
+
+For multi-instruction sequences inside efuncs. Tokens are resolved against
+parameter bindings and register aliases:
 
 ```
-func mark_green() {
-    mark(CH_GREEN, GREEN_INT)
-}
-
-state search {
-    mark_green()    // body is inlined here
-    move(E) -> search
-}
+asm { SENSE target result }
+asm { MOVE direction }
 ```
 
-Functions are purely syntactic — the body is pasted at each call site.
-No arguments, no return values, no recursion.
+### String form
 
-## Raw Assembly
-
-Escape hatch for antssembly instructions:
+Escape hatch for raw antssembly instructions:
 
 ```
 asm("NOP")
 asm("HALT")
 ```
 
+## Dead Code Elimination
+
+The compiler performs two levels of DCE:
+
+### Extern register DCE (AST level)
+
+When inlining library functions, the compiler checks whether each statement
+references unbound extern registers. Statements that reference unbound externs
+are silently dropped. This means a library can include coordinate-tracking code
+in `move()` that is automatically removed if the user does not bind `dx`/`dy`.
+
+### Antssembly DCE (post-compilation)
+
+After generating antssembly, the compiler removes:
+
+- **Dead instructions:** Instructions after an unconditional `JMP` that are not
+  jump targets.
+- **Duplicate labels:** Consecutive identical labels.
+- **No-op SETs:** `SET rX rX` instructions where source equals destination.
+
 ## Auto-generated Code
 
-The compiler automatically generates:
+### Coordinate Tracking
 
-### Coordinate Tracking (`__post_move`)
+The standard library's `move()` function includes conditional updates to `dx`/`dy`
+based on `last_dir`. If the user binds these extern registers, coordinate tracking
+is active. If not, the tracking code is eliminated by DCE.
 
-After every `move()`, updates `dx`/`dy` based on `last_dir`:
-- N (1): dy -= 1
-- E (2): dx += 1
-- S (3): dy += 1
-- W (4): dx -= 1
+### State Dispatch (`__post_move`)
 
-### State Dispatch
+The compiler generates a `__post_move` label with a jump table that dispatches to
+the correct state based on the `next_st` register. This is used internally after
+actions.
 
-After coordinate update, dispatches to the target state via a jump table
-indexed by the `next_st` register.
+### Heatmap Tags
 
-### Direction Bookkeeping
+States are automatically assigned heatmap tag indices (up to 8). The compiler
+emits `.tag` directives and `TAG` instructions at state entry.
 
-`move(dir)` automatically sets `last_dir` to the numeric direction value.
-The compiler skips redundant `SET rX rX` when `move(last_dir)` is used.
+## Standard Library (`lib/libant.sw`)
 
-## Built-in Names
+The standard library (`package ant`) provides all built-in operations. Import it
+with `import "libant"`.
 
-| Name | Context | Value |
+### Constants
+
+#### Directions
+
+| Name | Value | Description |
 |---|---|---|
-| `N`, `E`, `S`, `W` | direction | 1, 2, 3, 4 |
-| `NORTH`, `EAST`, `SOUTH`, `WEST` | direction | 1, 2, 3, 4 |
-| `HERE` | direction | current cell |
-| `RANDOM` | direction | random |
-| `EMPTY` | cell type | 0 |
-| `WALL` | cell type | 1 |
-| `FOOD` | cell type | 2 |
-| `NEST` | cell type | 3 |
-| `CH_RED`, `CH_BLUE`, `CH_GREEN`, `CH_YELLOW` | channel | pheromone channels |
-| `FOOD`, `NEST` | sense target | for `sense()` |
+| `N`, `NORTH` | 1 | North |
+| `E`, `EAST` | 2 | East |
+| `S`, `SOUTH` | 3 | South |
+| `W`, `WEST` | 4 | West |
+| `HERE` | 0 | Current cell |
+| `RANDOM` | 5 | Random direction |
 
-## Compilation
+#### Cell Types
+
+| Name | Value | Description |
+|---|---|---|
+| `EMPTY` | 0 | Empty cell |
+| `WALL` | 1 | Wall |
+| `FOOD` | 2 | Food source |
+| `NEST` | 3 | Ant nest |
+
+#### Pheromone Channels
+
+| Name | Value | Description |
+|---|---|---|
+| `CH_RED` | 0 | Red channel |
+| `CH_GREEN` | 1 | Green channel |
+| `CH_BLUE` | 2 | Blue channel |
+| `CH_YELLOW` | 3 | Yellow channel |
+
+### Extern Registers
+
+The library declares three extern registers: `dx`, `dy`, `last_dir`. Bind them
+in your register block to enable coordinate tracking:
 
 ```
-uv run python -m swarm program.sw              # stdout
-uv run python -m swarm program.sw --copy        # clipboard (pbcopy)
-uv run python -m swarm program.sw -o out.ant    # file output
+register (
+    x(ant.dx) = 0
+    y(ant.dy) = 0
+    heading(ant.last_dir) = id() % 4 + 1
+)
 ```
+
+### Sensing Functions
+
+| Function | Returns | Volatility |
+|---|---|---|
+| `sense(target)` | Direction to nearest cell of type (1-4), or 0 | volatile, stable when `target == WALL \|\| target == NEST` |
+| `probe(direction)` | Cell type: EMPTY(0), WALL(1), FOOD(2), NEST(3) | volatile, stable when `result == WALL \|\| result == NEST` |
+| `smell(channel)` | Direction of strongest pheromone (1-4), or 0 | volatile |
+| `sniff(channel, direction)` | Pheromone intensity (0-255) | volatile |
+| `carrying()` | 1 if carrying food, 0 otherwise | stable |
+| `id()` | Ant's unique ID (0-199) | stable |
+| `rand(max)` | Random integer in [0, max) | stable |
+| `rand_range(lo, hi)` | Random integer in [lo, hi) | stable |
+
+Note: `rand()` can be called with two arguments (`rand(1, 5)`) as a shorthand
+for `rand_range(1, 5)`. The compiler automatically dispatches to `rand_range`.
+
+### Action Functions
+
+| Function | Description |
+|---|---|
+| `move(direction)` | Move in direction. Consumes a tick. |
+| `pickup()` | Pick up food at current cell. Consumes a tick. |
+| `drop()` | Drop carried food. Consumes a tick. |
+
+### Instant Functions
+
+| Function | Description |
+|---|---|
+| `mark(channel, intensity)` | Mark pheromone (additive, capped at 255). |
+| `set_tag(tag)` | Override the heatmap tag mid-state. |
+
+## Bool Flags
+
+Pack up to 15 boolean flags into a single register using bitfield operations:
+
+```
+bool visited, has_trail
+
+visited = 1
+if visited { become skip }
+visited = 0
+```
+
+Bools are stored as individual bits in a shared flags register. They can be used
+in conditions and assignments but not in arithmetic expressions.
+
+## CLI
+
+The compiler is invoked via `uv run python -m swarm` with subcommands:
+
+```
+uv run python -m swarm compile program.sw              # compile to stdout
+uv run python -m swarm compile program.sw -o out.ant   # compile to file
+uv run python -m swarm compile program.sw --copy       # compile to clipboard
+uv run python -m swarm check program.sw                # lint
+uv run python -m swarm fmt program.sw                  # format to stdout
+uv run python -m swarm fmt program.sw --in-place       # format in place
+uv run python -m swarm stats program.sw                # print program stats
+uv run python -m swarm lsp                             # start LSP server
+uv run python -m swarm antssembly file.ant             # preprocess .ant file
+```
+
+The `compile` subcommand is the default -- bare `uv run python -m swarm program.sw`
+compiles directly.
+
+### Linter checks (`check`)
+
+- Unused registers
+- Undeclared identifiers
+- Unreachable states (not targeted by any transition)
+- States with no outgoing transitions
+- Unwired behavior exits
+- Stale reads (volatile-derived values used after an action)
+
+### Formatter (`fmt`)
+
+Re-indents with 4 spaces per nesting level, normalizes blank lines between
+top-level blocks, strips trailing whitespace.
+
+### Stats (`stats`)
+
+Reports source line counts, register usage, state/behavior/function counts,
+and compiled output metrics (instructions, labels, directives).
+
+### Antssembly preprocessor (`antssembly`)
+
+Preprocesses raw `.ant` files with `#include`, `#define`, `#ifdef`/`#ifndef`/`#endif`
+directives. Supports `--analyze` for static analysis, `--copy` for clipboard output,
+and `--strip` to remove comments.
 
 ## Complete Example
 
 ```
-const GREEN_INT = 50
+import "libant"
+
 const RED_START = 200
 const RED_DECAY = 3
+const GREEN_START = 255
 
-register scratch, dir, mark_str, dx, dy, next_st, last_dir, tmp
+register (
+    dir
+    mark_str = GREEN_START
+    x(ant.dx) = 0
+    y(ant.dy) = 0
+    next_st
+    heading(ant.last_dir) = id() % 4 + 1
+    tmp
+)
 
-init {
-    dx = 0
-    dy = 0
-    last_dir = id()
-    last_dir = last_dir % 4
-    last_dir = last_dir + 1
-    become search
-}
+init { become search }
 
 state search {
-    if carrying() != 0 { become start_return }
+    if carrying() { become start_return }
     if probe(HERE) == FOOD { become try_pickup }
 
-    scratch = sense(FOOD)
-    if scratch != 0 {
-        mark(CH_GREEN, GREEN_INT)
-        move(scratch) -> try_pickup
+    if mark_str {
+        mark(CH_GREEN, mark_str)
+        mark_str -= 1
     }
 
-    scratch = smell(CH_RED)
-    if scratch != 0 {
-        mark(CH_GREEN, GREEN_INT)
-        move(scratch) -> search
+    if dir := sense(FOOD) {
+        move(dir)
+        become try_pickup
     }
 
-    // Momentum walk
-    if last_dir != 0 {
-        scratch = probe(last_dir)
-        if scratch != WALL {
-            mark(CH_GREEN, GREEN_INT)
-            move(last_dir) -> search
+    if heading {
+        if probe(heading) != WALL {
+            move(heading)
+            become search
         }
     }
 
-    // Random fallback
-    dir = rand(4)
-    dir = dir + 1
-    move(dir) -> search
+    dir = rand(1, 5)
+    if probe(dir) != WALL {
+        move(dir)
+        become search
+    }
+
+    move(RANDOM)
+    become search
 }
 
 state try_pickup {
-    pickup() -> check_carry
+    if probe(HERE) != FOOD { become search }
+    pickup()
+    become check_carry
 }
 
 state check_carry {
-    if carrying() != 0 { become start_return }
+    if carrying() { become start_return }
     become search
 }
 
@@ -415,38 +797,70 @@ state start_return {
 }
 
 state return_home {
-    scratch = sense(NEST)
-    if scratch != 0 {
+    if dir := sense(NEST) {
         mark(CH_RED, mark_str)
-        move(scratch) -> do_drop
+        move(dir)
+        become do_drop
     }
+
     mark(CH_RED, mark_str)
-    mark_str = mark_str - RED_DECAY
+    mark_str -= RED_DECAY
     if mark_str < 1 { mark_str = 1 }
+
     become beeline_home
 }
 
 state do_drop {
-    drop() -> reset_coords
+    drop()
+    become reset_coords
 }
 
 state reset_coords {
-    dx = 0
-    dy = 0
+    x = 0
+    y = 0
+    mark_str = GREEN_START
     become search
 }
 
 state beeline_home {
-    if dx > 0 {
-        scratch = probe(W)
-        if scratch != WALL { move(W) -> return_home }
+    if x {
+        if x > 0 {
+            if probe(W) != WALL {
+                move(W)
+                become return_home
+            }
+        } else {
+            if probe(E) != WALL {
+                move(E)
+                become return_home
+            }
+        }
     }
-    if dx < 0 {
-        scratch = probe(E)
-        if scratch != WALL { move(E) -> return_home }
+
+    if y {
+        if y > 0 {
+            if probe(N) != WALL {
+                move(N)
+                become return_home
+            }
+        } else {
+            if probe(S) != WALL {
+                move(S)
+                become return_home
+            }
+        }
     }
-    scratch = smell(CH_GREEN)
-    if scratch != 0 { move(scratch) -> return_home }
-    move(RANDOM) -> return_home
+
+    if dir := smell(CH_GREEN) {
+        tmp = ((heading + 1) % 4) + 1
+        if dir != tmp {
+            move(dir)
+            become return_home
+        }
+    }
+
+    dir = rand(1, 5)
+    move(dir)
+    become return_home
 }
 ```

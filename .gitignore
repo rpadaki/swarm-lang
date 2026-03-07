@@ -5,3 +5,5 @@ __pycache__/
 .venv/
 target/
 *.wasm
+editors/zed/Cargo.lock
+editors/zed/grammars/
