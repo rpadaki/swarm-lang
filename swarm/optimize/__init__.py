@@ -17,6 +17,7 @@ class OptConfig:
     const_fold: bool = True
     state_reorder: bool = True
     loop_rotate: bool = True
+    strip: bool = False
 
     @classmethod
     def none(cls):

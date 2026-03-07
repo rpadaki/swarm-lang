@@ -64,6 +64,10 @@ def _compile():
     opt = None  # default: all optimizations
     if "-O0" in sys.argv:
         opt = OPT_NONE
+    if "--strip" in sys.argv or "-s" in sys.argv:
+        if opt is None:
+            opt = OptConfig()
+        opt.strip = True
 
     prog = Parser(tokenize(src.read_text())).parse_program()
     prog, packages, pkg_externs = resolve_imports(prog, src.parent)

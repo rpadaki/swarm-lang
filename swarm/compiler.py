@@ -261,13 +261,14 @@ class Compiler:
 
         for s in other: self._stmt(s)
 
-        auto_idx = self.next_tag
-        for name in self.states:
-            if name not in self.tags and auto_idx < 8:
-                tag_name = f"_t_{name}"
-                self.emit(f".tag {auto_idx} {tag_name}")
-                self.tags[name] = str(auto_idx)
-                auto_idx += 1
+        if not self.opt.strip:
+            auto_idx = self.next_tag
+            for name in self.states:
+                if name not in self.tags and auto_idx < 8:
+                    tag_name = f"_t_{name}"
+                    self.emit(f".tag {auto_idx} {tag_name}")
+                    self.tags[name] = str(auto_idx)
+                    auto_idx += 1
 
         has_init = init or self._reg_initializers
         if has_init:
@@ -281,12 +282,31 @@ class Compiler:
             states = self._reorder_states(states, init)
         for sb in states:
             self.emit_lbl(sb.name)
-            if sb.name in self.tags:
+            if not self.opt.strip and sb.name in self.tags:
                 self.emit(f"  TAG {self.tags[sb.name]}")
             for s in sb.body: self._stmt(s)
 
         self.out = dce(self.out, self.opt)
+        if self.opt.strip:
+            self.out = self._strip_symbols(self.out)
         return "\n".join(self.out)
+
+    def _strip_symbols(self, lines):
+        remap = {}
+        for i, name in enumerate(self.states):
+            remap[name] = f"_s{i}"
+        remap["main"] = f"_s{len(self.states)}"
+        result = []
+        for line in lines:
+            if line.endswith(":") and line[:-1] in remap:
+                result.append(f"{remap[line[:-1]]}:")
+            elif line.lstrip().startswith(("JMP ", "JNE ", "JEQ ", "JGT ", "JLT ")):
+                for old, new in remap.items():
+                    line = line.replace(f" {old}", f" {new}")
+                result.append(line)
+            else:
+                result.append(line)
+        return result
 
     @staticmethod
     def _terminal_become(body):
@@ -367,7 +387,8 @@ class Compiler:
         for n in s.names:
             if self.nreg >= 8: raise RuntimeError(f"out of registers for '{n}'")
             r = f"r{self.nreg}"; self.nreg += 1; self.regs[n] = r
-            self.emit(f".alias {n} {r}")
+            if not self.opt.strip:
+                self.emit(f".alias {n} {r}")
         for user_name, extern_qual in s.bindings.items():
             self._extern_bindings[extern_qual] = user_name
         for name, expr in s.initializers.items():
@@ -377,13 +398,16 @@ class Compiler:
         if not self.bool_reg:
             if self.nreg >= 8: raise RuntimeError("no register available for bool flags")
             self.bool_reg = f"r{self.nreg}"; self.nreg += 1
-            self.emit(f".alias __flags {self.bool_reg}")
+            if not self.opt.strip:
+                self.emit(f".alias __flags {self.bool_reg}")
         for n in s.names:
             bit = len(self.bools)
             if bit >= 15: raise RuntimeError("too many bools (max 15)")
             self.bools[n] = (self.bool_reg, 1 << bit)
 
     def _tagdecl(self, s):
+        if self.opt.strip:
+            return
         idx = s.index if s.index is not None else self.next_tag
         self.next_tag = idx + 1
         self.emit(f".tag {idx} {s.name}")
