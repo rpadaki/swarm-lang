@@ -86,6 +86,21 @@ class TestResolveImports(unittest.TestCase):
         self.assertIn("probe", names)
         self.assertIn("move", names)
 
+    def test_find_module_ant_alias(self):
+        p = _find_module("ant", None)
+        self.assertIsNotNone(p)
+        self.assertTrue(p.exists())
+        self.assertEqual(p.name, "libant.sw")
+
+    def test_import_ant_resolves(self):
+        src = 'import "ant"'
+        prog = Parser(tokenize(src)).parse_program()
+        resolved, packages = resolve_imports(prog)
+        self.assertIn("ant", packages)
+        names = [n.name for n in resolved if hasattr(n, "name")]
+        self.assertIn("sense", names)
+        self.assertIn("move", names)
+
     def test_missing_module_raises(self):
         src = 'import "nonexistent_module"'
         prog = Parser(tokenize(src)).parse_program()
@@ -190,18 +205,46 @@ state s {
         out = compile_src(MINIMAL)
         self.assertIn("__post_move:", out)
 
-    def test_action_with_arrow_transition(self):
+    def test_action_then_become(self):
         src = """\
 import "libant"
 register dir, dx, dy, next_st, last_dir
 init { dx = 0 become s }
 state s {
-    move(RANDOM) -> s
+    move(RANDOM)
+    become s
 }
 """
         out = compile_src(src)
         self.assertIn("MOVE", out)
-        self.assertIn("__post_move", out)
+        self.assertIn("JMP s", out)
+
+    def test_import_ant_shorthand(self):
+        src = """\
+import "ant"
+using ant
+register dir, dx, dy, next_st, last_dir
+init { dx = 0 become s }
+state s {
+    move(RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertIn("MOVE", out)
+
+    def test_import_ant_qualified(self):
+        src = """\
+import "ant"
+register dir, dx, dy, next_st, last_dir
+init { dx = 0 become s }
+state s {
+    ant.move(ant.RANDOM)
+    become s
+}
+"""
+        out = compile_src(src)
+        self.assertIn("MOVE", out)
 
 
 if __name__ == "__main__":

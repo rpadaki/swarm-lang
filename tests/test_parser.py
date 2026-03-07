@@ -331,20 +331,21 @@ class TestQualifiedNames(unittest.TestCase):
         self.assertEqual(stmt.func, "ant.mark")
 
 
-class TestActionStmtTransition(unittest.TestCase):
-    def test_action_with_arrow(self):
-        prog = parse("export func move(d) { x = 1 }\nstate s { move(N) -> s }")
-        stmt = prog[1].body[0]
+class TestActionStmt(unittest.TestCase):
+    def test_action_then_become(self):
+        prog = parse("state s { move(N) become s }")
+        self.assertEqual(len(prog[0].body), 2)
+        stmt = prog[0].body[0]
         self.assertIsInstance(stmt, ActionStmt)
         self.assertEqual(stmt.func, "move")
-        self.assertEqual(stmt.transition, "s")
+        self.assertIsInstance(prog[0].body[1], Become)
+        self.assertEqual(prog[0].body[1].target, "s")
 
-    def test_action_without_arrow(self):
-        prog = parse("export func move(d) { x = 1 }\nstate s { move(N) become s }")
-        stmt = prog[1].body[0]
+    def test_action_without_become(self):
+        prog = parse("state s { move(N) x = 1 become s }")
+        stmt = prog[0].body[0]
         self.assertIsInstance(stmt, ActionStmt)
         self.assertEqual(stmt.func, "move")
-        self.assertIsNone(stmt.transition)
 
 
 if __name__ == "__main__":

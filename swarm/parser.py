@@ -228,10 +228,9 @@ class Parser:
         return FuncCall(name)
 
     def parse_action(self):
-        """Parse action: move(dir) [-> target]"""
+        """Parse action: move(dir)"""
         ft = self.advance(); self.expect("LPAREN"); a = self.parse_args(); self.expect("RPAREN")
-        arrow_tgt = self.expect("IDENT").value if self.match("ARROW") else None
-        return ActionStmt(func=ft.value, args=a, transition=arrow_tgt, line=ft.line)
+        return ActionStmt(func=ft.value, args=a, line=ft.line)
 
     def parse_mark_action(self):
         ft = self.advance(); self.expect("LPAREN"); a = self.parse_args(); self.expect("RPAREN")

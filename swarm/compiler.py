@@ -53,6 +53,7 @@ def _find_module(name: str, source_dir: Path | None) -> Path | None:
     if source_dir:
         candidates.append(source_dir / f"{name}.sw")
     candidates.append(LIB_DIR / f"{name}.sw")
+    candidates.append(LIB_DIR / f"lib{name}.sw")
     for p in candidates:
         if p.exists():
             return p
@@ -157,8 +158,6 @@ class Compiler:
         def rewrite(stmts):
             for s in stmts:
                 if isinstance(s, Become) and s.target in em: s.target = em[s.target]
-                if isinstance(s, ActionStmt) and s.transition and s.transition in em:
-                    s.transition = em[s.transition]
                 if isinstance(s, Assignment):
                     s.target = S(s.target); s.expr = subst_expr(s.expr)
                 elif isinstance(s, ActionStmt): s.args = [S(a) for a in s.args]
@@ -371,12 +370,6 @@ class Compiler:
         if not ef:
             raise RuntimeError(f"line {s.line}: unknown func: {s.func} (did you forget: import \"libant\"?)")
         self._inline_efunc(ef, s.args, None)
-        if s.transition:
-            if s.transition in self.sidx:
-                self.emit(f"  SET {self.ns()} {self.sidx[s.transition]}")
-                self.emit(f"  JMP __post_move")
-            else:
-                self.emit(f"  JMP {s.transition}")
 
     def _eval_cond(self, cond):
         left, op, right = cond
