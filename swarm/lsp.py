@@ -1298,6 +1298,38 @@ def _word_range(line: int, text: str, offset: int, word: str) -> lsp.Range:
     )
 
 
+# ── Document Links ───────────────────────────────────────────────
+
+@server.feature(lsp.TEXT_DOCUMENT_DOCUMENT_LINK)
+def document_link(params: lsp.DocumentLinkParams):
+    doc = server.workspace.get_text_document(params.text_document.uri)
+    sd = _source_dir(params.text_document.uri)
+    links = []
+    for i, line in enumerate(doc.source.split("\n")):
+        m = re.match(r'\s*import\s+"([^"]+)"', line)
+        if m:
+            str_start = line.index(f'"{m.group(1)}"')
+            str_end = str_start + len(m.group(1)) + 2
+            resolved = _find_module(m.group(1), sd)
+            target_uri = None
+            if resolved:
+                if resolved.is_dir():
+                    sw_files = sorted(resolved.glob("*.sw"))
+                    if sw_files:
+                        target_uri = f"file://{sw_files[0]}"
+                else:
+                    target_uri = f"file://{resolved}"
+            if target_uri:
+                links.append(lsp.DocumentLink(
+                    range=lsp.Range(
+                        start=lsp.Position(line=i, character=str_start),
+                        end=lsp.Position(line=i, character=str_end),
+                    ),
+                    target=target_uri,
+                ))
+    return links
+
+
 # ── Formatting ───────────────────────────────────────────────────
 
 @server.feature(lsp.TEXT_DOCUMENT_FORMATTING)
