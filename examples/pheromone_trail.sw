@@ -21,7 +21,7 @@ init {
 
 state search {
     if carrying() { become start_return }
-    if probe(HERE) == CELL_FOOD {
+    if probe(HERE) == FOOD {
         pickup()
         become start_return
     }
@@ -33,7 +33,7 @@ state search {
     }
 
     // Momentum: keep heading
-    if probe(heading) != CELL_WALL {
+    if probe(heading) != WALL {
         move(heading)
         become search
     }
@@ -61,25 +61,25 @@ state return_home {
 
     // Beeline via coordinates
     if dx > 0 {
-        if probe(W) != CELL_WALL {
+        if probe(W) != WALL {
             move(W)
             become return_home
         }
     }
     if dx < 0 {
-        if probe(E) != CELL_WALL {
+        if probe(E) != WALL {
             move(E)
             become return_home
         }
     }
     if dy > 0 {
-        if probe(N) != CELL_WALL {
+        if probe(N) != WALL {
             move(N)
             become return_home
         }
     }
     if dy < 0 {
-        if probe(S) != CELL_WALL {
+        if probe(S) != WALL {
             move(S)
             become return_home
         }

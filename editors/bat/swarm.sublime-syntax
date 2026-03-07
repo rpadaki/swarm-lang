@@ -315,9 +315,7 @@ contexts:
   builtins:
     - match: \b(N|E|S|W|NORTH|EAST|SOUTH|WEST|HERE|RANDOM)\b
       scope: constant.language.direction.swarm
-    - match: \b(FOOD|WALL|NEST|ANT|EMPTY)\b
-      scope: constant.language.target.swarm
-    - match: \b(CELL_EMPTY|CELL_WALL|CELL_FOOD|CELL_NEST)\b
+    - match: \b(EMPTY|WALL|FOOD|NEST|ANT)\b
       scope: constant.language.cell.swarm
     - match: \b(CH_RED|CH_BLUE|CH_GREEN|CH_YELLOW)\b
       scope: constant.language.channel.swarm

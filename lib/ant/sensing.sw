@@ -10,10 +10,10 @@ export func sense(target) -> volatile result stable(target == WALL || target == 
     asm { SENSE target result }
 }
 
-// probe inspects the cell at the given direction and returns its cell type:
-// CELL_EMPTY (0), CELL_WALL (1), CELL_FOOD (2), or CELL_NEST (3). The
-// result is stable when the cell is a wall or nest.
-export func probe(direction) -> volatile result stable(result == CELL_WALL || result == CELL_NEST) {
+// probe inspects the cell at the given direction and returns its type:
+// EMPTY (0), WALL (1), FOOD (2), or NEST (3). The result is stable when
+// the cell is a WALL or NEST.
+export func probe(direction) -> volatile result stable(result == WALL || result == NEST) {
     asm { PROBE direction result }
 }
 

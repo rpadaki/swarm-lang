@@ -35,38 +35,23 @@ export const HERE = 0
 // RANDOM selects a uniformly random cardinal direction each time it is used.
 export const RANDOM = 5
 
-// ── Sense targets (for sense()) ─────────────────────────────
-// These use the SenseTarget encoding expected by the SENSE instruction.
+// ── Cell types / sense targets ──────────────────────────────
+// These values are shared by SENSE (as targets) and PROBE (as return values).
 
-// FOOD is the sense target for food.
-export const FOOD = 0
+// EMPTY is an empty, passable cell.
+export const EMPTY = 0
 
-// WALL is the sense target for walls.
+// WALL is an impassable wall cell.
 export const WALL = 1
 
-// NEST is the sense target for the nest.
-export const NEST = 2
+// FOOD is a cell containing food.
+export const FOOD = 2
 
-// ANT is the sense target for other ants.
-export const ANT = 3
+// NEST is the ant nest. Dropping food here scores a point.
+export const NEST = 3
 
-// EMPTY is the sense target for empty cells.
-export const EMPTY = 4
-
-// ── Cell types (returned by probe()) ────────────────────────
-// These use the CellType encoding returned by the PROBE instruction.
-
-// CELL_EMPTY is the probe result for an unoccupied, passable cell.
-export const CELL_EMPTY = 0
-
-// CELL_WALL is the probe result for an impassable wall cell.
-export const CELL_WALL = 1
-
-// CELL_FOOD is the probe result for a cell containing food.
-export const CELL_FOOD = 2
-
-// CELL_NEST is the probe result for a nest cell. Dropping food here scores a point.
-export const CELL_NEST = 3
+// ANT represents another ant (sense target only, not returned by probe).
+export const ANT = 4
 
 // ── Pheromone channels ──────────────────────────────────────
 

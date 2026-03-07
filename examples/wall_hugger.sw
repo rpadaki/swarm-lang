@@ -25,23 +25,23 @@ init {
 
 state explore {
     if carrying() { become return_home }
-    if probe(HERE) == CELL_FOOD {
+    if probe(HERE) == FOOD {
         pickup()
         become return_home
     }
 
     // Right-hand rule
     turn_right()
-    if probe(dir) != CELL_WALL {
+    if probe(dir) != WALL {
         move(dir)
         become explore
     }
-    if probe(heading) != CELL_WALL {
+    if probe(heading) != WALL {
         move(heading)
         become explore
     }
     turn_left()
-    if probe(dir) != CELL_WALL {
+    if probe(dir) != WALL {
         move(dir)
         become explore
     }
@@ -61,25 +61,25 @@ state return_home {
     }
 
     if dx > 0 {
-        if probe(W) != CELL_WALL {
+        if probe(W) != WALL {
             move(W)
             become return_home
         }
     }
     if dx < 0 {
-        if probe(E) != CELL_WALL {
+        if probe(E) != WALL {
             move(E)
             become return_home
         }
     }
     if dy > 0 {
-        if probe(N) != CELL_WALL {
+        if probe(N) != WALL {
             move(N)
             become return_home
         }
     }
     if dy < 0 {
-        if probe(S) != CELL_WALL {
+        if probe(S) != WALL {
             move(S)
             become return_home
         }
