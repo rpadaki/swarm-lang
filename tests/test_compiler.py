@@ -11,10 +11,10 @@ from swarm.compiler import Compiler, resolve_imports, _find_module
 LIB_PARENT = Path(__file__).resolve().parent.parent / "lib"
 
 
-def compile_src(src: str) -> str:
+def compile_src(src: str, opt=None) -> str:
     prog = Parser(tokenize(src)).parse_program()
     prog, packages, pkg_externs = resolve_imports(prog, source_dir=LIB_PARENT)
-    return Compiler(packages, pkg_externs).compile(prog)
+    return Compiler(packages, pkg_externs, opt=opt).compile(prog)
 
 
 MINIMAL = """\
@@ -529,6 +529,44 @@ state search {
         self.assertIn("MOD r4 4", out)
         self.assertIn("ADD r4 1", out)
         self.assertIn("SET r5 255", out)
+
+
+class TestOptConfig(unittest.TestCase):
+    def test_opt_none_compiles(self):
+        from swarm.optimize import OPT_NONE
+        out = compile_src(MINIMAL, opt=OPT_NONE)
+        self.assertIn("MOVE", out)
+        self.assertIn("wander:", out)
+
+    def test_opt_none_preserves_jmps(self):
+        from swarm.optimize import OPT_NONE, OptConfig
+        src = """\
+import "ant"
+using ant
+register x
+state a { move(RANDOM) become b }
+state b { move(RANDOM) become a }
+"""
+        out = compile_src(src, opt=OPT_NONE)
+        self.assertIn("JMP b", out)
+        self.assertIn("JMP a", out)
+
+    def test_individual_toggle(self):
+        from swarm.optimize import OptConfig
+        src = """\
+import "ant"
+using ant
+const A = 10
+const B = 3
+register x
+state s { x = A + B move(RANDOM) become s }
+"""
+        opt = OptConfig(const_fold=False)
+        out = compile_src(src, opt=opt)
+        self.assertIn("ADD", out)
+        out2 = compile_src(src)
+        self.assertNotIn("ADD", out2)
+        self.assertIn("SET r1 13", out2)
 
 
 class TestDCEPass(unittest.TestCase):

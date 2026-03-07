@@ -6,6 +6,7 @@ from pathlib import Path
 from .ast import *
 from .tokenizer import tokenize
 from .parser import Parser
+from .optimize import OptConfig, OPT_ALL
 from .optimize.dce import dce
 
 BINOP = {"+":"ADD","-":"SUB","*":"MUL","/":"DIV","%":"MOD",
@@ -119,7 +120,9 @@ def _load_package_dir(pkg_dir: Path):
 
 
 class Compiler:
-    def __init__(self, packages: dict | None = None, pkg_externs: dict | None = None):
+    def __init__(self, packages: dict | None = None, pkg_externs: dict | None = None,
+                 opt: OptConfig | None = None):
+        self.opt = opt or OPT_ALL
         self.out: list[str] = []
         self.consts: dict = {}
         self.regs: dict = {}
@@ -274,14 +277,15 @@ class Compiler:
                 self._compile_expr_into(tgt, expr)
             if init:
                 for s in init.body: self._stmt(s)
-        states = self._reorder_states(states, init)
+        if self.opt.state_reorder:
+            states = self._reorder_states(states, init)
         for sb in states:
             self.emit_lbl(sb.name)
             if sb.name in self.tags:
                 self.emit(f"  TAG {self.tags[sb.name]}")
             for s in sb.body: self._stmt(s)
 
-        self.out = dce(self.out)
+        self.out = dce(self.out, self.opt)
         return "\n".join(self.out)
 
     @staticmethod
@@ -445,10 +449,11 @@ class Compiler:
         return None
 
     def _compile_expr_into(self, tgt, expr):
-        folded = self._try_fold(expr)
-        if folded is not None:
-            if tgt != folded: self.emit(f"  SET {tgt} {folded}")
-            return
+        if self.opt.const_fold:
+            folded = self._try_fold(expr)
+            if folded is not None:
+                if tgt != folded: self.emit(f"  SET {tgt} {folded}")
+                return
         if isinstance(expr, str):
             val = self.R(expr)
             if tgt != val: self.emit(f"  SET {tgt} {val}")
@@ -692,24 +697,44 @@ class Compiler:
             self.emit_lbl(end)
 
     def _while(self, s):
+        if self.opt.loop_rotate:
+            self._while_rotated(s)
+        else:
+            self._while_top(s)
+
+    def _while_rotated(self, s):
         cond_lbl, brk, body = self.L("wc"), self.L("we"), self.L("wb")
         self.loops.append((brk, cond_lbl))
         self.emit(f"  JMP {cond_lbl}")
         self.emit_lbl(body)
         for st in s.body: self._stmt(st)
         self.emit_lbl(cond_lbl)
-        l, op, r = self._eval_cond(s.cond)
-        if op == ">=":
-            self.emit(f"  JGT {l} {r} {body}")
-            self.emit(f"  JEQ {l} {r} {body}")
-        elif op == "<=":
-            self.emit(f"  JLT {l} {r} {body}")
-            self.emit(f"  JEQ {l} {r} {body}")
-        else:
-            j = COND_JMP.get(op)
-            self.emit(f"  {j} {l} {r} {body}")
+        self._emit_cond_jump(s.cond, body)
         self.emit_lbl(brk)
         self.loops.pop()
+
+    def _while_top(self, s):
+        top, brk, body = self.L("wh"), self.L("we"), self.L("wb")
+        self.loops.append((brk, top))
+        self.emit_lbl(top)
+        self._emit_cond_jump(s.cond, body)
+        self.emit(f"  JMP {brk}")
+        self.emit_lbl(body)
+        for st in s.body: self._stmt(st)
+        self.emit(f"  JMP {top}"); self.emit_lbl(brk)
+        self.loops.pop()
+
+    def _emit_cond_jump(self, cond, target):
+        l, op, r = self._eval_cond(cond)
+        if op == ">=":
+            self.emit(f"  JGT {l} {r} {target}")
+            self.emit(f"  JEQ {l} {r} {target}")
+        elif op == "<=":
+            self.emit(f"  JLT {l} {r} {target}")
+            self.emit(f"  JEQ {l} {r} {target}")
+        else:
+            j = COND_JMP.get(op)
+            self.emit(f"  {j} {l} {r} {target}")
 
     def _loop(self, s):
         top, brk = self.L("lp"), self.L("le")

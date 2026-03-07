@@ -1,6 +1,12 @@
-"""Dead code elimination pass for Swarm antssembly output."""
+"""Optimization passes for Swarm antssembly output."""
+
+from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import OptConfig
 
 _LABEL_RE = re.compile(r"^(\w+):$")
 _JMP_RE = re.compile(r"^\s+JMP\s+(\S+)")
@@ -10,27 +16,28 @@ _ARITH_RE = re.compile(r"^\s+(\w+)\s+(\S+)\s+(\S+)$")
 _ARITH_OPS = {"ADD", "SUB", "MUL", "DIV", "MOD", "AND", "OR", "XOR", "LSHIFT", "RSHIFT"}
 
 
-def dce(lines: list[str]) -> list[str]:
-    """Remove dead code from compiled antssembly output.
-
-    Eliminates:
-    - Instructions after unconditional JMP that aren't jump targets
-    - JMP to the immediately following label
-    - Consecutive duplicate labels
-    - Labels not targeted by any jump
-    - SET instructions where source == destination
-    """
+def dce(lines: list[str], opt: OptConfig | None = None) -> list[str]:
+    """Run post-emission optimization passes on antssembly output."""
+    if opt is None:
+        from . import OPT_ALL
+        opt = OPT_ALL
     prev = None
     while lines != prev:
         prev = lines
-        jump_targets = _collect_jump_targets(lines)
-        lines = _remove_dead_after_jmp(lines, jump_targets)
-        lines = _collapse_jmp_chains(lines)
-        lines = _remove_jmp_to_next(lines)
+        if opt.dead_code:
+            jump_targets = _collect_jump_targets(lines)
+            lines = _remove_dead_after_jmp(lines, jump_targets)
+        if opt.jmp_chain:
+            lines = _collapse_jmp_chains(lines)
+        if opt.jmp_to_next:
+            lines = _remove_jmp_to_next(lines)
         lines = _remove_duplicate_labels(lines)
-        lines = _remove_unreferenced_labels(lines)
-    lines = _remove_noop_sets(lines)
-    lines = _fuse_set_op(lines)
+        if opt.unreferenced_labels:
+            lines = _remove_unreferenced_labels(lines)
+    if opt.noop_sets:
+        lines = _remove_noop_sets(lines)
+    if opt.set_op_fusion:
+        lines = _fuse_set_op(lines)
     return lines
 
 

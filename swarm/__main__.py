@@ -51,18 +51,23 @@ def _compile():
     from .tokenizer import tokenize
     from .parser import Parser
     from .compiler import Compiler, resolve_imports
+    from .optimize import OptConfig, OPT_NONE
 
     if len(sys.argv) < 2:
-        print("Usage: python -m swarm <file.sw> [--copy] [-o out.ant]", file=sys.stderr)
+        print("Usage: python -m swarm <file.sw> [--copy] [-o out.ant] [-O0]", file=sys.stderr)
         sys.exit(1)
     src = Path(sys.argv[1])
     do_copy = "--copy" in sys.argv
     out_file = None
     if "-o" in sys.argv: out_file = Path(sys.argv[sys.argv.index("-o") + 1])
 
+    opt = None  # default: all optimizations
+    if "-O0" in sys.argv:
+        opt = OPT_NONE
+
     prog = Parser(tokenize(src.read_text())).parse_program()
     prog, packages, pkg_externs = resolve_imports(prog, src.parent)
-    output = Compiler(packages, pkg_externs).compile(prog)
+    output = Compiler(packages, pkg_externs, opt=opt).compile(prog)
 
     if out_file:
         out_file.write_text(output + "\n")
