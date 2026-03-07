@@ -32,7 +32,7 @@ impl zed::Extension for SwarmExtension {
             command: uv,
             args: vec![
                 "run".into(),
-                "--project".into(),
+                "--directory".into(),
                 root.clone(),
                 "python".into(),
                 "-m".into(),

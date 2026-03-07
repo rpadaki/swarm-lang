@@ -8,30 +8,30 @@ extern register dx, dy, last_dir
 
 // ── Directions ──────────────────────────────────────────────
 
-export const N = N
-export const NORTH = N
-export const E = E
-export const EAST = E
-export const S = S
-export const SOUTH = S
-export const W = W
-export const WEST = W
-export const HERE = HERE
-export const RANDOM = RANDOM
+export const N = 1
+export const NORTH = 1
+export const E = 2
+export const EAST = 2
+export const S = 3
+export const SOUTH = 3
+export const W = 4
+export const WEST = 4
+export const HERE = 0
+export const RANDOM = 5
 
 // ── Cell types ──────────────────────────────────────────────
 
-export const EMPTY = EMPTY
-export const WALL = WALL
-export const FOOD = FOOD
-export const NEST = NEST
+export const EMPTY = 0
+export const WALL = 1
+export const FOOD = 2
+export const NEST = 3
 
 // ── Pheromone channels ──────────────────────────────────────
 
-export const CH_RED = CH_RED
-export const CH_BLUE = CH_BLUE
-export const CH_GREEN = CH_GREEN
-export const CH_YELLOW = CH_YELLOW
+export const CH_RED = 0
+export const CH_BLUE = 1
+export const CH_GREEN = 2
+export const CH_YELLOW = 3
 
 // ── Sensing ──────────────────────────────────────────────────
 
