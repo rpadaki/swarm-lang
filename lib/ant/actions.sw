@@ -8,8 +8,16 @@ extern register dx, dy, last_dir
 
 // move moves the ant one cell in the given direction (N/E/S/W/RANDOM).
 // Moving into a wall is a no-op but still consumes the tick. Consumes a tick.
+// When extern registers are bound, updates dead reckoning state:
+//   last_dir = direction, dx/dy adjusted by +/-1.
+// Dead reckoning is approximate — wall collisions are not detected.
 export action func move(direction) {
     asm { MOVE direction }
+    last_dir = direction
+    if direction == 1 { dy -= 1 }
+    if direction == 3 { dy += 1 }
+    if direction == 2 { dx += 1 }
+    if direction == 4 { dx -= 1 }
 }
 
 // pickup picks up one food item from the ant's current cell.

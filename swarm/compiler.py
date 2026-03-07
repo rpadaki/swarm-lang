@@ -605,6 +605,15 @@ class Compiler:
         bindings = dict(zip(ef.params, args))
         if ef.ret and tgt:
             bindings[ef.ret] = tgt
+        saved_regs = {}
+        for param_name, arg_name in bindings.items():
+            saved_regs[param_name] = self.regs.get(param_name)
+            self.regs[param_name] = self.R(arg_name)
+        for qual, user_name in self._extern_bindings.items():
+            _, ext_name = qual.rsplit(".", 1)
+            if ext_name not in saved_regs and user_name in self.regs:
+                saved_regs[ext_name] = self.regs.get(ext_name)
+                self.regs[ext_name] = self.regs[user_name]
         all_externs = self._all_externs()
         for s in ef.body:
             if all_externs and self._stmt_uses_unbound_extern(s, all_externs):
@@ -613,6 +622,11 @@ class Compiler:
                 self._asm_block(s.tokens, bindings)
             else:
                 self._inline_stmt(s, bindings, all_externs)
+        for name, old_val in saved_regs.items():
+            if old_val is None:
+                self.regs.pop(name, None)
+            else:
+                self.regs[name] = old_val
 
     def _inline_stmt(self, s, bindings, all_externs):
         """Compile a statement from an inlined efunc, applying DCE for unbound externs."""
@@ -671,12 +685,37 @@ class Compiler:
         if isinstance(left, CallExpr):
             self._call_expr("r0", left)
             return "r0", op, self.R(right)
-        return self.R(left), op, self.R(right)
+        l, r = self.R(left), self.R(right)
+        if not l.startswith("r") and l.lstrip("-").isdigit():
+            self.emit(f"  SET r0 {l}")
+            l = "r0"
+        return l, op, r
 
     def _single_become(self, body):
         return body[0].target if len(body) == 1 and isinstance(body[0], Become) else None
 
+    @staticmethod
+    def _const_cmp(l, op, r):
+        if op == "==": return l == r
+        if op == "!=": return l != r
+        if op == ">":  return l > r
+        if op == "<":  return l < r
+        if op == ">=": return l >= r
+        if op == "<=": return l <= r
+        return None
+
     def _if(self, s):
+        # Constant folding: if both sides are compile-time constants, evaluate statically
+        left, op, right = s.cond
+        if isinstance(left, str) and isinstance(right, str):
+            lv, rv = self.R(left), self.R(right)
+            if lv.lstrip("-").isdigit() and rv.lstrip("-").isdigit():
+                if self._const_cmp(int(lv), op, int(rv)):
+                    for st in s.body: self._stmt(st)
+                elif s.else_body:
+                    for st in s.else_body: self._stmt(st)
+                return
+
         # Normalize >= and <= by inverting to < and > with swapped branches
         if s.cond[1] in (">=", "<="):
             inv_op = "<" if s.cond[1] == ">=" else ">"
