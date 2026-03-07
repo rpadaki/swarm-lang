@@ -1,0 +1,280 @@
+%YAML 1.2
+---
+name: Swarm
+scope: source.swarm
+file_extensions: [sw]
+first_line_match: '^\s*//.*\bswarm\b'
+
+contexts:
+  main:
+    - include: comments
+    - include: top_level
+
+  comments:
+    - match: //.*$
+      scope: comment.line.swarm
+    - match: /\*
+      scope: punctuation.definition.comment.begin.swarm
+      push:
+        - meta_scope: comment.block.swarm
+        - match: \*/
+          scope: punctuation.definition.comment.end.swarm
+          pop: true
+
+  top_level:
+    - match: \b(import)\b
+      scope: keyword.control.import.swarm
+      push:
+        - match: '"[^"]*"'
+          scope: string.quoted.double.swarm
+          pop: true
+
+    - match: \b(export)\b
+      scope: keyword.control.export.swarm
+      push:
+        - match: \b(func)\b
+          scope: keyword.declaration.swarm
+          set:
+            - match: \b([A-Za-z_]\w*)\b
+              scope: entity.name.function.swarm
+            - match: \(
+              scope: punctuation.section.parens.begin.swarm
+              push:
+                - match: \b([A-Za-z_]\w*)\b
+                  scope: variable.parameter.swarm
+                - match: ','
+                  scope: punctuation.separator.swarm
+                - match: \)
+                  scope: punctuation.section.parens.end.swarm
+                  pop: true
+            - match: ->
+              scope: keyword.operator.arrow.swarm
+              push:
+                - match: \b([A-Za-z_]\w*)\b
+                  scope: entity.name.type.swarm
+                  pop: true
+            - match: (?=\{)
+              pop: true
+        - match: \b(const)\b
+          scope: keyword.declaration.swarm
+          set:
+            - match: \b([A-Za-z_]\w*)\b
+              scope: constant.other.swarm
+            - match: '='
+              scope: keyword.operator.assignment.swarm
+            - match: '-?\d+'
+              scope: constant.numeric.swarm
+            - match: (?=\n|//)
+              pop: true
+
+    - match: \b(const)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: constant.other.swarm
+        - match: '='
+          scope: keyword.operator.assignment.swarm
+        - match: '-?\d+'
+          scope: constant.numeric.swarm
+        - match: (?=\n|//)
+          pop: true
+
+    - match: \b(register)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: variable.other.swarm
+        - match: ','
+          scope: punctuation.separator.swarm
+        - match: (?=\{|\n|//)
+          pop: true
+
+    - match: \b(bool)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: variable.other.swarm
+        - match: ','
+          scope: punctuation.separator.swarm
+        - match: (?=\{|\n|//)
+          pop: true
+
+    - match: \b(tag)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: '-?\d+'
+          scope: constant.numeric.swarm
+        - match: \b([A-Za-z_]\w*)\b
+          scope: entity.name.label.swarm
+        - match: (?=\n|//)
+          pop: true
+
+    - match: \b(behavior)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: entity.name.type.swarm
+          pop: true
+
+    - match: \b(state)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: entity.name.type.swarm
+        - match: '='
+          scope: keyword.operator.assignment.swarm
+          push:
+            - match: \b([A-Za-z_]\w*)\b
+              scope: entity.name.type.swarm
+              pop: true
+        - match: (?=\{)
+          pop: true
+
+    - match: \b(init)\b
+      scope: keyword.declaration.swarm
+
+    - match: \b(func)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: entity.name.function.swarm
+        - match: \(
+          scope: punctuation.section.parens.begin.swarm
+          push:
+            - match: \b([A-Za-z_]\w*)\b
+              scope: variable.parameter.swarm
+            - match: ','
+              scope: punctuation.separator.swarm
+            - match: \)
+              scope: punctuation.section.parens.end.swarm
+              pop: true
+        - match: ->
+          scope: keyword.operator.arrow.swarm
+          push:
+            - match: \b([A-Za-z_]\w*)\b
+              scope: entity.name.type.swarm
+              pop: true
+        - match: (?=\{)
+          pop: true
+
+    - include: statements
+
+  statements:
+    - include: comments
+    - include: strings
+    - include: keywords
+    - include: actions
+    - include: builtins
+    - include: sense_functions
+    - include: asm_block
+    - include: operators
+    - include: numbers
+    - include: identifiers
+    - include: punctuation
+
+  keywords:
+    - match: \b(if|else|while|loop|match|case|default)\b
+      scope: keyword.control.swarm
+    - match: \b(become)\b
+      scope: keyword.control.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: entity.name.type.swarm
+          pop: true
+    - match: \b(break|continue)\b
+      scope: keyword.control.swarm
+    - match: \b(exit)\b
+      scope: keyword.declaration.swarm
+      push:
+        - match: \b([A-Za-z_]\w*)\b
+          scope: entity.name.label.swarm
+          pop: true
+
+  actions:
+    - match: \b(move|pickup|drop)\b
+      scope: keyword.other.action.swarm
+    - match: \b(mark|set_tag)\b
+      scope: support.function.swarm
+
+  sense_functions:
+    - match: \b(sense|probe|smell|sniff|carrying|id|rand|rand_range)\b
+      scope: support.function.swarm
+
+  asm_block:
+    - match: \b(asm)\b
+      scope: keyword.other.swarm
+      push:
+        - match: \{
+          scope: punctuation.section.braces.begin.swarm
+          set:
+            - meta_scope: meta.asm.swarm
+            - match: \b(SENSE|PROBE|SMELL|SNIFF|CARRYING|ID|RANDOM|MOVE|PICKUP|DROP|MARK|TAG|SET|ADD|SUB|MUL|DIV|MOD|AND|OR|XOR|LSHIFT|RSHIFT|JMP|JEQ|JNE|JGT|JLT)\b
+              scope: keyword.operator.asm.swarm
+            - match: \b(r[0-7])\b
+              scope: variable.language.register.swarm
+            - match: '-?\d+'
+              scope: constant.numeric.swarm
+            - match: \b([A-Za-z_]\w*)\b
+              scope: variable.other.swarm
+            - match: \}
+              scope: punctuation.section.braces.end.swarm
+              pop: true
+        - match: \(
+          scope: punctuation.section.parens.begin.swarm
+          set:
+            - match: '"[^"]*"'
+              scope: string.quoted.double.swarm
+            - match: \)
+              scope: punctuation.section.parens.end.swarm
+              pop: true
+
+  builtins:
+    - match: \b(N|E|S|W|NORTH|EAST|SOUTH|WEST|HERE|RANDOM)\b
+      scope: constant.language.direction.swarm
+    - match: \b(EMPTY|WALL|FOOD|NEST)\b
+      scope: constant.language.cell.swarm
+    - match: \b(CH_RED|CH_BLUE|CH_GREEN|CH_YELLOW)\b
+      scope: constant.language.channel.swarm
+
+  operators:
+    - match: ->
+      scope: keyword.operator.arrow.swarm
+    - match: ':='
+      scope: keyword.operator.walrus.swarm
+    - match: '!'
+      scope: keyword.operator.negation.swarm
+    - match: '[=!<>]='
+      scope: keyword.operator.comparison.swarm
+    - match: '[<>]'
+      scope: keyword.operator.comparison.swarm
+    - match: '='
+      scope: keyword.operator.assignment.swarm
+    - match: '[+\-*/%&|^]'
+      scope: keyword.operator.arithmetic.swarm
+    - match: '<<|>>'
+      scope: keyword.operator.bitwise.swarm
+
+  numbers:
+    - match: '-?\b\d+\b'
+      scope: constant.numeric.swarm
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.swarm
+      push:
+        - meta_scope: string.quoted.double.swarm
+        - match: '"'
+          scope: punctuation.definition.string.end.swarm
+          pop: true
+
+  identifiers:
+    - match: \b([A-Za-z_]\w*)\b
+      scope: variable.other.swarm
+
+  punctuation:
+    - match: '[{}]'
+      scope: punctuation.section.braces.swarm
+    - match: '[()]'
+      scope: punctuation.section.parens.swarm
+    - match: ','
+      scope: punctuation.separator.swarm

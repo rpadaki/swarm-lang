@@ -1,0 +1,11 @@
+[project]
+name = "swarm-tools"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "pygls>=2.0",
+    "lsprotocol",
+]
+
+[project.scripts]
+swarm-lsp = "tools.swarm_lsp:main"
