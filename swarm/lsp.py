@@ -903,6 +903,27 @@ def definition(params: lsp.DefinitionParams):
     line = lines[params.position.line]
     sd = _source_dir(params.text_document.uri)
 
+    # Skip if cursor is in a comment (but allow strings for import paths)
+    cs_ranges = _compute_comment_string_ranges(doc.source)
+    col = params.position.character
+    for sl, sc, el, ec in cs_ranges:
+        is_comment = False
+        src_line = lines[sl] if sl < len(lines) else ""
+        if sc < len(src_line) and src_line[sc:sc+2] == "//":
+            is_comment = True
+        elif sc + 1 < len(src_line) and src_line[sc:sc+2] == "/*":
+            is_comment = True
+        if is_comment:
+            if sl == el and params.position.line == sl and sc <= col < ec:
+                return None
+            if sl != el:
+                if params.position.line == sl and col >= sc:
+                    return None
+                if sl < params.position.line < el:
+                    return None
+                if params.position.line == el and col < ec:
+                    return None
+
     # Cmd+click on import path string → open the package directory/file
     import_match = re.match(r'\s*import\s+"([^"]+)"', line)
     if import_match:
@@ -1003,30 +1024,85 @@ def definition(params: lsp.DefinitionParams):
 
 # ── Find References ──────────────────────────────────────────────
 
+def _find_enclosing_func(lines: list[str], line_idx: int) -> tuple[int, int] | None:
+    """If line_idx is inside a function definition, return (start, end) line range."""
+    for start in range(line_idx, -1, -1):
+        if re.match(r'\s*(?:export\s+)?(?:action\s+)?func\s+\w+', lines[start]):
+            depth = 0
+            for i in range(start, len(lines)):
+                depth += lines[i].count("{") - lines[i].count("}")
+                if depth <= 0 and "{" in "".join(lines[start:i+1]):
+                    return (start, i)
+            return (start, len(lines) - 1)
+    return None
+
+
+def _is_func_param(lines: list[str], line_idx: int, word: str) -> tuple[int, int] | None:
+    """If word is a parameter of the function at line_idx, return the function's (start, end)."""
+    func_range = _find_enclosing_func(lines, line_idx)
+    if not func_range:
+        return None
+    func_line = lines[func_range[0]]
+    m = re.search(r'func\s+\w+\s*\(([^)]*)\)', func_line)
+    if m:
+        params = [p.strip() for p in m.group(1).split(",")]
+        if word in params:
+            return func_range
+    return None
+
+
 @server.feature(lsp.TEXT_DOCUMENT_REFERENCES)
 def references(params: lsp.ReferenceParams):
     doc = server.workspace.get_text_document(params.text_document.uri)
     lines = doc.source.split("\n")
     if params.position.line >= len(lines):
         return None
-    word = _word_at(lines[params.position.line], params.position.character)
+
+    line = lines[params.position.line]
+    col = params.position.character
+
+    # Skip if cursor is in a comment or string
+    cs_ranges = _compute_comment_string_ranges(doc.source)
+    if _in_comment_or_string(params.position.line, col, cs_ranges):
+        return None
+
+    word = _word_at(line, col)
     if not word:
         return None
 
-    results = []
     esc = re.escape(word)
     pat = re.compile(rf'\b{esc}\b')
 
+    # If word is a function parameter, scope references to that function
+    func_scope = _is_func_param(lines, params.position.line, word)
+    if func_scope:
+        results = []
+        start, end = func_scope
+        for i in range(start, end + 1):
+            for m in pat.finditer(lines[i]):
+                if not _in_comment_or_string(i, m.start(), cs_ranges):
+                    results.append(lsp.Location(
+                        uri=params.text_document.uri,
+                        range=lsp.Range(
+                            start=lsp.Position(line=i, character=m.start()),
+                            end=lsp.Position(line=i, character=m.end()),
+                        ),
+                    ))
+        return results if results else None
+
+    results = []
+
     # Find in current file
-    for i, line in enumerate(lines):
-        for m in pat.finditer(line):
-            results.append(lsp.Location(
-                uri=params.text_document.uri,
-                range=lsp.Range(
-                    start=lsp.Position(line=i, character=m.start()),
-                    end=lsp.Position(line=i, character=m.end()),
-                ),
-            ))
+    for i, line_text in enumerate(lines):
+        for m in pat.finditer(line_text):
+            if not _in_comment_or_string(i, m.start(), cs_ranges):
+                results.append(lsp.Location(
+                    uri=params.text_document.uri,
+                    range=lsp.Range(
+                        start=lsp.Position(line=i, character=m.start()),
+                        end=lsp.Position(line=i, character=m.end()),
+                    ),
+                ))
 
     # Find in imported package files
     sd = _source_dir(params.text_document.uri)
@@ -1037,16 +1113,19 @@ def references(params: lsp.ReferenceParams):
             continue
         sw_files = sorted(resolved.glob("*.sw")) if resolved.is_dir() else [resolved]
         for sw_file in sw_files:
-            mod_lines = sw_file.read_text().split("\n")
-            for i, line in enumerate(mod_lines):
-                for m in pat.finditer(line):
-                    results.append(lsp.Location(
-                        uri=f"file://{sw_file}",
-                        range=lsp.Range(
-                            start=lsp.Position(line=i, character=m.start()),
-                            end=lsp.Position(line=i, character=m.end()),
-                        ),
-                    ))
+            mod_src = sw_file.read_text()
+            mod_lines = mod_src.split("\n")
+            mod_cs = _compute_comment_string_ranges(mod_src)
+            for i, lt in enumerate(mod_lines):
+                for m in pat.finditer(lt):
+                    if not _in_comment_or_string(i, m.start(), mod_cs):
+                        results.append(lsp.Location(
+                            uri=f"file://{sw_file}",
+                            range=lsp.Range(
+                                start=lsp.Position(line=i, character=m.start()),
+                                end=lsp.Position(line=i, character=m.end()),
+                            ),
+                        ))
 
     return results if results else None
 

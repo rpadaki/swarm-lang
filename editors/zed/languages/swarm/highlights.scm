@@ -28,6 +28,7 @@
 ; ── Comparison, binary, and compound operators ──
 (comparison_operator) @operator
 (binary_operator) @operator
+(logical_operator) @operator
 (compound_operator) @operator
 "=" @operator
 
