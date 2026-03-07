@@ -254,10 +254,10 @@ class TestFuncDef(unittest.TestCase):
 
 class TestImport(unittest.TestCase):
     def test_import(self):
-        prog = parse('import "libant"')
+        prog = parse('import "../lib/ant"')
         self.assertEqual(len(prog), 1)
         self.assertIsInstance(prog[0], Import)
-        self.assertEqual(prog[0].path, "libant")
+        self.assertEqual(prog[0].path, "../lib/ant")
 
 
 class TestBoolDecl(unittest.TestCase):
@@ -313,7 +313,7 @@ class TestUsingDecl(unittest.TestCase):
         self.assertEqual(prog[0].name, "ant")
 
     def test_using_in_program(self):
-        prog = parse('import "libant"\nusing ant\nstate s { become s }')
+        prog = parse('import "../lib/ant"\nusing ant\nstate s { become s }')
         self.assertIsInstance(prog[0], Import)
         self.assertIsInstance(prog[1], UsingDecl)
         self.assertIsInstance(prog[2], StateBlock)

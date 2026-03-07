@@ -391,7 +391,7 @@ class Compiler:
             if ef_alt and len(e.args) == len(ef_alt.params):
                 self._inline_efunc(ef_alt, e.args, tgt)
                 return
-        raise RuntimeError(f"line {e.line}: unknown func: {e.func} (did you forget: import \"libant\"?)")
+        raise RuntimeError(f"line {e.line}: unknown func: {e.func} (did you forget to import a package?)")
 
     def _all_externs(self):
         """Return the set of all extern register names across all packages."""
@@ -536,7 +536,7 @@ class Compiler:
     def _action(self, s):
         ef = self._resolve_efunc(s.func)
         if not ef:
-            raise RuntimeError(f"line {s.line}: unknown func: {s.func} (did you forget: import \"libant\"?)")
+            raise RuntimeError(f"line {s.line}: unknown func: {s.func} (did you forget to import a package?)")
         self._inline_efunc(ef, s.args, None)
 
     def _eval_cond(self, cond):

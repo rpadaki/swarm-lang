@@ -162,7 +162,13 @@ role's ants have walked.
 `FOOD`, `WALL`, `NEST`, `ANT`, `EMPTY`
 
 ### Pheromone Channels
-`CH_RED`, `CH_BLUE`, `CH_GREEN`, `CH_YELLOW`
+
+| Name | Value |
+|---|---|
+| `CH_RED` | 0 |
+| `CH_BLUE` | 1 |
+| `CH_GREEN` | 2 |
+| `CH_YELLOW` | 3 |
 
 ## Execution Model
 

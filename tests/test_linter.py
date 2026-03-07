@@ -26,7 +26,7 @@ def stale_warnings(warnings: list[str]) -> list[str]:
 HEADER = """\
 import "ant"
 using ant
-register dir, dx, dy, next_st, last_dir
+register dir, dx, dy, last_dir
 """
 
 

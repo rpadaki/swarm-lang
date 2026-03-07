@@ -8,8 +8,7 @@ register (
     dir,
     dx(ant.dx),
     dy(ant.dy),
-    heading(ant.last_dir) = id() % 4 + 1,
-    next_st
+    heading(ant.last_dir) = id() % 4 + 1
 )
 
 behavior wander {

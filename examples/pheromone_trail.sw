@@ -8,12 +8,11 @@ const RED_START = 200
 const RED_DECAY = 5
 
 register (
-dir,
-mark_str,
-dx(ant.dx),
-dy(ant.dy),
-heading(ant.last_dir) = id() % 4 + 1,
-next_st
+    dir,
+    mark_str,
+    dx(ant.dx),
+    dy(ant.dy),
+    heading(ant.last_dir) = id() % 4 + 1
 )
 
 init {

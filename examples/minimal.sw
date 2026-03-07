@@ -4,7 +4,7 @@ package main
 import "../lib/ant"
 using ant
 
-register dir, next_st
+register dir
 
 init {
     become wander

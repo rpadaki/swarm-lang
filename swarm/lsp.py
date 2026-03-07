@@ -857,7 +857,7 @@ def hover(params: lsp.HoverParams):
 
     KEYWORD_DOCS = {
         "become": "Instant state transition — does not consume a tick.",
-        "state": "Named block of logic. Each tick executes one state.",
+        "state": "Named block of logic. Runs until an action ends the tick.",
         "behavior": "Reusable state template with exit points for wiring.",
         "init": "Runs once when the ant spawns. Must `become` a state.",
         "func": "Inline function — expanded at every call site.",

@@ -92,12 +92,11 @@ Registers are declared in a parenthesized block with optional bindings and initi
 
 ```
 register (
-    dir
-    x(ant.dx) = 0
-    y(ant.dy) = 0
-    heading(ant.last_dir) = id() % 4 + 1
-    mark_str = GREEN_START
-    next_st
+    dir,
+    x(ant.dx) = 0,
+    y(ant.dy) = 0,
+    heading(ant.last_dir) = id() % 4 + 1,
+    mark_str = GREEN_START,
     tmp
 )
 ```
@@ -118,7 +117,7 @@ the compiler maps `dx` to the same physical register as `x`.
 The comma-separated flat syntax is also supported:
 
 ```
-register dir, mark_str, dx, dy, next_st, last_dir, tmp
+register dir, mark_str, dx, dy, last_dir, tmp
 ```
 
 Register initializers are compiled into the program entry point, before the `init`
@@ -627,8 +626,8 @@ export func sense(target) -> volatile result stable(target == WALL || target == 
 | Name | Value | Description |
 |---|---|---|
 | `CH_RED` | 0 | Red channel |
-| `CH_GREEN` | 1 | Green channel |
-| `CH_BLUE` | 2 | Blue channel |
+| `CH_BLUE` | 1 | Blue channel |
+| `CH_GREEN` | 2 | Green channel |
 | `CH_YELLOW` | 3 | Yellow channel |
 
 ### Extern Registers
@@ -656,9 +655,6 @@ register (
 | `id()` | Ant's unique ID (0-199) | stable |
 | `rand(max)` | Random integer in [0, max) | stable |
 | `rand_range(lo, hi)` | Random integer in [lo, hi) | stable |
-
-Note: `rand()` can be called with two arguments (`rand(1, 5)`) as a shorthand
-for `rand_range(1, 5)`. The compiler automatically dispatches to `rand_range`.
 
 ### Action Functions
 
