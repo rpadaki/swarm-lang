@@ -678,6 +678,24 @@ class TestDCEPass(unittest.TestCase):
         result = dce(lines)
         self.assertIn("a:", result)
 
+    def test_state_reorder_fallthrough(self):
+        """States reordered so become targets follow their predecessor."""
+        src = """\
+import "ant"
+using ant
+register x
+state a { move(RANDOM) become b }
+state c { move(RANDOM) become a }
+state b { move(RANDOM) become c }
+"""
+        out = compile_src(src)
+        lines = out.split("\n")
+        labels = [l.strip().rstrip(":") for l in lines if l.strip().endswith(":")]
+        # a->b->c should be the chain order
+        self.assertEqual(labels, ["a", "b", "c"])
+        # JMP b after state a should be eliminated (fallthrough)
+        self.assertNotIn("  JMP b", out)
+
     def test_set_op_fusion(self):
         from swarm.optimize.dce import dce
         lines = [

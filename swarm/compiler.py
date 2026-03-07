@@ -274,6 +274,7 @@ class Compiler:
                 self._compile_expr_into(tgt, expr)
             if init:
                 for s in init.body: self._stmt(s)
+        states = self._reorder_states(states, init)
         for sb in states:
             self.emit_lbl(sb.name)
             if sb.name in self.tags:
@@ -282,6 +283,58 @@ class Compiler:
 
         self.out = dce(self.out)
         return "\n".join(self.out)
+
+    @staticmethod
+    def _terminal_become(body):
+        """Return the target of the last become in a state body, or None."""
+        if body and isinstance(body[-1], Become):
+            return body[-1].target
+        return None
+
+    def _reorder_states(self, states, init):
+        """Reorder states so terminal become targets are placed as physical successors."""
+        if len(states) <= 1:
+            return states
+        by_name = {sb.name: sb for sb in states}
+        state_names = set(by_name)
+
+        # Build preferred successor: state -> its terminal become target (if it's another state)
+        succ = {}
+        for sb in states:
+            t = self._terminal_become(sb.body)
+            if t and t in state_names and t != sb.name:
+                succ[sb.name] = t
+
+        # Invert: for each target, track which states want to precede it
+        preds: dict[str, list[str]] = {}
+        for src, dst in succ.items():
+            preds.setdefault(dst, []).append(src)
+
+        # Determine init's become target — that state should come first
+        first_state = states[0].name
+        if init and init.body:
+            for s in init.body:
+                if isinstance(s, Become) and s.target in state_names:
+                    first_state = s.target
+                    break
+
+        # Build chains greedily
+        placed = set()
+        result = []
+
+        def place_chain(start):
+            cur = start
+            while cur and cur not in placed and cur in by_name:
+                placed.add(cur)
+                result.append(by_name[cur])
+                cur = succ.get(cur)
+
+        place_chain(first_state)
+        for sb in states:
+            if sb.name not in placed:
+                place_chain(sb.name)
+
+        return result
 
     def _stmt(self, s):
         if   isinstance(s, RegDecl):    self._regdecl(s)
