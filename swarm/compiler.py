@@ -737,19 +737,16 @@ class Compiler:
             et = self._single_become(s.else_body)
             if et: self.emit(f"  {j} {l} {r} {tgt}"); self.emit(f"  JMP {et}"); return
 
-        inv = INV_JMP[j]
         if s.else_body:
             el, end = self.L("else"), self.L("fi")
-            self.emit(f"  {inv} {l} {r} {el}")
-            if j in ("JGT", "JLT"): self.emit(f"  JEQ {l} {r} {el}")
+            self._emit_skip(j, l, r, el)
             for st in s.body: self._stmt(st)
             self.emit(f"  JMP {end}"); self.emit_lbl(el)
             for st in s.else_body: self._stmt(st)
             self.emit_lbl(end)
         else:
             end = self.L("fi")
-            self.emit(f"  {inv} {l} {r} {end}")
-            if j in ("JGT", "JLT"): self.emit(f"  JEQ {l} {r} {end}")
+            self._emit_skip(j, l, r, end)
             for st in s.body: self._stmt(st)
             self.emit_lbl(end)
 
@@ -781,9 +778,31 @@ class Compiler:
         self.emit(f"  JMP {top}"); self.emit_lbl(brk)
         self.loops.pop()
 
+    def _emit_skip(self, j, l, r, skip_lbl):
+        """Emit guard jump(s) to skip_lbl when condition j(l,r) is NOT met.
+
+        When j is JGT/JLT and r is a constant, reduces 2 jumps to 1
+        by adjusting the constant (NOT(x > K) = x < K+1).
+        """
+        inv = INV_JMP[j]
+        if self.opt.cmp_reduce and j in ("JGT", "JLT") and r.lstrip("-").isdigit():
+            k = int(r)
+            adj = str(k + 1) if j == "JGT" else str(k - 1)
+            self.emit(f"  {inv} {l} {adj} {skip_lbl}")
+        else:
+            self.emit(f"  {inv} {l} {r} {skip_lbl}")
+            if j in ("JGT", "JLT"):
+                self.emit(f"  JEQ {l} {r} {skip_lbl}")
+
     def _emit_cond_jump(self, cond, target):
         l, op, r = self._eval_cond(cond)
-        if op == ">=":
+        if self.opt.cmp_reduce and op in (">=", "<=") and r.lstrip("-").isdigit():
+            k = int(r)
+            if op == ">=":
+                self.emit(f"  JGT {l} {k - 1} {target}")
+            else:
+                self.emit(f"  JLT {l} {k + 1} {target}")
+        elif op == ">=":
             self.emit(f"  JGT {l} {r} {target}")
             self.emit(f"  JEQ {l} {r} {target}")
         elif op == "<=":
