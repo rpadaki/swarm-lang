@@ -14,8 +14,6 @@ _JUMP_RE = re.compile(r"^\s+J\w+\s+.*\s+(\S+)$")
 _SET_RE = re.compile(r"^\s+SET\s+(\S+)\s+(\S+)$")
 _ARITH_RE = re.compile(r"^\s+(\w+)\s+(\S+)\s+(\S+)$")
 _ARITH_OPS = {"ADD", "SUB", "MUL", "DIV", "MOD", "AND", "OR", "XOR", "LSHIFT", "RSHIFT"}
-_COND_RE = re.compile(r"^\s+(JGT|JLT|JEQ|JNE)\s+(\S+)\s+(\S+)\s+(\S+)$")
-_NO_REG_WRITE = {"MOVE", "PICKUP", "DROP", "MARK", "TAG", "JMP", "JEQ", "JNE", "JGT", "JLT"}
 
 
 def dce(lines: list[str], opt: OptConfig | None = None) -> list[str]:
@@ -38,8 +36,6 @@ def dce(lines: list[str], opt: OptConfig | None = None) -> list[str]:
         lines = _remove_duplicate_labels(lines)
         if opt.unreferenced_labels:
             lines = _remove_unreferenced_labels(lines)
-    if opt.cmp_reduce:
-        lines = _reduce_cmp_pair(lines)
     if opt.noop_sets:
         lines = _remove_noop_sets(lines)
     if opt.set_op_fusion:
@@ -281,81 +277,6 @@ def _remove_unreferenced_labels(lines: list[str]) -> list[str]:
                 result.append(line)
         else:
             result.append(line)
-    return result
-
-
-def _reduce_cmp_pair(lines: list[str]) -> list[str]:
-    """Reduce JGT+JEQ / JLT+JEQ pairs to a single jump when one operand is a known constant.
-
-    Propagates constants from preceding SET instructions, then reduces:
-      SET rN K; JGT rM rN L; JEQ rM rN L  →  SET rN K; JLT rM K+1 L
-      SET rN K; JLT rM rN L; JEQ rM rN L  →  SET rN K; JGT rM K-1 L
-    Also handles pairs that already have a literal constant operand.
-    """
-    # Track most recent SET rN <constant> per register
-    reg_const: dict[str, str] = {}
-    result: list[str] = []
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-
-        # Labels: clear tracking (control flow join)
-        if _LABEL_RE.match(line):
-            reg_const.clear()
-            result.append(line)
-            i += 1
-            continue
-
-        # SET rN K: track constant value
-        set_m = _SET_RE.match(line)
-        if set_m:
-            reg, val = set_m.group(1), set_m.group(2)
-            if val.lstrip("-").isdigit():
-                reg_const[reg] = val
-            else:
-                reg_const.pop(reg, None)
-            result.append(line)
-            i += 1
-            continue
-
-        # Try to match JGT/JLT + JEQ pair
-        if i + 1 < len(lines):
-            j1 = _COND_RE.match(line)
-            if j1 and j1.group(1) in ("JGT", "JLT"):
-                jop, rm, r2, label = j1.groups()
-                # Resolve r2 to a constant (literal or from SET tracking)
-                k_str = r2 if r2.lstrip("-").isdigit() else reg_const.get(r2)
-                if k_str is not None:
-                    j2 = _COND_RE.match(lines[i + 1])
-                    if (j2 and j2.group(1) == "JEQ" and j2.group(2) == rm
-                            and j2.group(3) == r2 and j2.group(4) == label):
-                        k = int(k_str)
-                        if jop == "JGT":
-                            result.append(f"  JLT {rm} {k + 1} {label}")
-                        else:
-                            result.append(f"  JGT {rm} {k - 1} {label}")
-                        i += 2
-                        continue
-
-        # Invalidate registers written by non-jump instructions
-        stripped = line.strip()
-        if stripped:
-            parts = stripped.split()
-            op = parts[0]
-            if op not in _NO_REG_WRITE:
-                if op in _ARITH_OPS and len(parts) >= 2:
-                    reg_const.pop(parts[1], None)
-                elif op in ("PROBE", "SENSE", "SMELL") and len(parts) >= 3:
-                    reg_const.pop(parts[-1], None)
-                elif op == "SNIFF" and len(parts) >= 4:
-                    reg_const.pop(parts[-1], None)
-                elif op in ("CARRYING", "ID", "RANDOM") and len(parts) >= 2:
-                    reg_const.pop(parts[1], None)
-                else:
-                    reg_const.clear()
-
-        result.append(line)
-        i += 1
     return result
 
 
