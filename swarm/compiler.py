@@ -302,7 +302,9 @@ class Compiler:
             if line.endswith(":"):
                 name = line[:-1]
                 if name not in remap:
-                    if prev_stripped is not None:
+                    if name == "main":
+                        remap[name] = "main"
+                    elif prev_stripped is not None:
                         remap[name] = prev_stripped
                     else:
                         remap[name] = f"_{counter}"

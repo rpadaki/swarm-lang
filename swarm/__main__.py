@@ -89,10 +89,13 @@ def _compile(args):
 
     if args.output:
         out_file = Path(args.output)
-        out_file.write_text(output if opt.strip else output + "\n")
+        out_file.write_text(output if (opt and opt.strip) else output + "\n")
         print(f"Wrote {out_file}", file=sys.stderr)
     else:
-        print(output)
+        if opt.strip:
+            sys.stdout.write(output)
+        else:
+            print(output)
 
 
 def _check(args):
