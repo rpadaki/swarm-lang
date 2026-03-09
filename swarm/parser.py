@@ -3,8 +3,6 @@
 from .ast import *
 from .tokenizer import Tok
 
-ACTION_KW = {"move", "pickup", "drop"}
-MARK_KW = {"mark", "set_tag"}
 
 PREC = {"|": 1, "^": 2, "&": 3, "<<": 4, ">>": 4, "+": 5, "-": 5, "*": 6, "/": 6, "%": 6}
 
@@ -269,13 +267,6 @@ class Parser:
         while not self.match("RBRACE"): stmts.append(self.parse_stmt())
         return stmts
 
-    def _is_action_or_mark_call(self, name):
-        bare = name.split(".")[-1] if "." in name else name
-        return bare in ACTION_KW or bare in MARK_KW
-
-    def _is_action_call(self, name):
-        bare = name.split(".")[-1] if "." in name else name
-        return bare in ACTION_KW
 
     def parse_stmt(self):
         t = self.peek()
@@ -293,11 +284,9 @@ class Parser:
             if self._peek_is_qualified_call():
                 return self._parse_qualified_call_stmt()
 
-            if t.value in ACTION_KW:  return self.parse_action()
-            if t.value in MARK_KW:    return self.parse_mark_action()
             if self.pos+1 < len(self.toks) and self.toks[self.pos+1].type == "LPAREN":
-                n = self.advance().value; self.expect("LPAREN"); a = self.parse_args(); self.expect("RPAREN")
-                return FuncCall(n)
+                ft = self.advance(); self.expect("LPAREN"); a = self.parse_args(); self.expect("RPAREN")
+                return FuncCall(ft.value, a)
             if self.pos+1 < len(self.toks) and self.toks[self.pos+1].type == "OP":
                 nv = self.toks[self.pos+1].value
                 if nv == "=" or (len(nv) == 2 and nv[1] == "=" and nv[0] in "+-*/%&|^"):
@@ -309,18 +298,8 @@ class Parser:
         ft_line = self.peek().line
         name = self._read_maybe_qualified()
         self.expect("LPAREN"); a = self.parse_args(); self.expect("RPAREN")
-        if self._is_action_call(name) or self._is_action_or_mark_call(name):
-            return ActionStmt(func=name, args=a, line=ft_line)
-        return FuncCall(name)
+        return FuncCall(name, a)
 
-    def parse_action(self):
-        """Parse action: move(dir)"""
-        ft = self.advance(); self.expect("LPAREN"); a = self.parse_args(); self.expect("RPAREN")
-        return ActionStmt(func=ft.value, args=a, line=ft.line)
-
-    def parse_mark_action(self):
-        ft = self.advance(); self.expect("LPAREN"); a = self.parse_args(); self.expect("RPAREN")
-        return ActionStmt(func=ft.value, args=a, line=ft.line)
 
     def parse_asm(self):
         self.advance()

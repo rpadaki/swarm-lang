@@ -221,6 +221,7 @@ class Compiler:
                 if isinstance(s, Assignment):
                     s.target = S(s.target); s.expr = subst_expr(s.expr)
                 elif isinstance(s, ActionStmt): s.args = [S(a) for a in s.args]
+                elif isinstance(s, FuncCall): s.args = [S(a) for a in s.args]
                 elif isinstance(s, IfStmt):
                     s.cond = subst_cond(s.cond); rewrite(s.body)
                     if s.else_body: rewrite(s.else_body)
@@ -367,7 +368,6 @@ class Compiler:
         elif isinstance(s, TagDecl):    self._tagdecl(s)
         elif isinstance(s, Const):      self.consts[s.name] = s.value
         elif isinstance(s, Assignment): self._assign(s)
-        elif isinstance(s, ActionStmt): self._action(s)
         elif isinstance(s, Become):     self.emit(f"  JMP {s.target}")
         elif isinstance(s, IfStmt):     self._if(s)
         elif isinstance(s, WhileStmt):  self._while(s)
@@ -378,7 +378,7 @@ class Compiler:
         elif isinstance(s, FuncCall):
             ef = self._resolve_efunc(s.name)
             if ef:
-                self._inline_efunc(ef, [], None)
+                self._inline_efunc(ef, s.args, None)
             elif s.name in self.funcs:
                 for st in self.funcs[s.name]: self._stmt(st)
             else: raise RuntimeError(f"unknown func: {s.name}")
@@ -548,11 +548,10 @@ class Compiler:
         elif isinstance(s, LoopStmt):
             for st in s.body:
                 names.update(self._stmt_refs_names(st))
-        elif isinstance(s, ActionStmt):
-            for a in s.args:
-                names.add(a)
         elif isinstance(s, FuncCall):
             names.add(s.name)
+            for a in s.args:
+                names.add(a)
         elif isinstance(s, AsmBlock):
             names.update(s.tokens)
         elif isinstance(s, MatchStmt):
@@ -666,11 +665,6 @@ class Compiler:
         resolved = [tokens[0]] + [self.R_asm(t, bindings) for t in tokens[1:]]
         self.emit(f"  {' '.join(resolved)}")
 
-    def _action(self, s):
-        ef = self._resolve_efunc(s.func)
-        if not ef:
-            raise RuntimeError(f"line {s.line}: unknown func: {s.func} (did you forget to import a package?)")
-        self._inline_efunc(ef, s.args, None)
 
     def _eval_cond(self, cond):
         left, op, right = cond

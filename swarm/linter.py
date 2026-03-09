@@ -91,7 +91,7 @@ def _collect_register_usage(stmts, func_defs=None):
             written.add(s.target)
             for ref in _refs_in_expr(s.expr):
                 read.add(ref)
-        elif isinstance(s, ActionStmt):
+        elif isinstance(s, (ActionStmt, FuncCall)):
             for a in s.args:
                 if isinstance(a, str): read.add(a)
         elif isinstance(s, IfStmt):
@@ -192,11 +192,14 @@ def _is_volatile_call(call_expr, efunc_map):
 
 
 def _is_action_stmt(stmt, efunc_map):
-    """Return True if an ActionStmt invokes an action ExportFunc."""
-    if not isinstance(stmt, ActionStmt):
-        return False
-    ef = efunc_map.get(stmt.func)
-    return ef is not None and ef.is_action
+    """Return True if a FuncCall invokes an action ExportFunc."""
+    if isinstance(stmt, FuncCall):
+        ef = efunc_map.get(stmt.name)
+        return ef is not None and ef.is_action
+    if isinstance(stmt, ActionStmt):
+        ef = efunc_map.get(stmt.func)
+        return ef is not None and ef.is_action
+    return False
 
 
 def _always_terminates(stmts):
@@ -232,9 +235,10 @@ def _check_stale_reads_block(stmts, efunc_map, func_defs, volatile, stale):
             if isinstance(s.expr, CallExpr) and _is_volatile_call(s.expr, efunc_map):
                 volatile.add(s.target)
 
-        elif isinstance(s, ActionStmt):
-            # Check reads in action args
-            for a in s.args:
+        elif isinstance(s, (ActionStmt, FuncCall)):
+            # Check reads in action/func args
+            args = s.args if isinstance(s, (ActionStmt, FuncCall)) else []
+            for a in args:
                 if isinstance(a, str) and a in stale:
                     warnings.append((a, s.line))
             # If this is a tick-consuming action, all volatile regs become stale

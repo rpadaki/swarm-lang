@@ -377,25 +377,27 @@ class TestQualifiedNames(unittest.TestCase):
     def test_qualified_func_call_stmt(self):
         prog = parse("state s { ant.mark(CH_RED, 100) }")
         stmt = prog[0].body[0]
-        self.assertIsInstance(stmt, ActionStmt)
-        self.assertEqual(stmt.func, "ant.mark")
+        self.assertIsInstance(stmt, FuncCall)
+        self.assertEqual(stmt.name, "ant.mark")
+        self.assertEqual(stmt.args, ["CH_RED", "100"])
 
 
-class TestActionStmt(unittest.TestCase):
+class TestFuncCallStmt(unittest.TestCase):
     def test_action_then_become(self):
         prog = parse("state s { move(N) become s }")
         self.assertEqual(len(prog[0].body), 2)
         stmt = prog[0].body[0]
-        self.assertIsInstance(stmt, ActionStmt)
-        self.assertEqual(stmt.func, "move")
+        self.assertIsInstance(stmt, FuncCall)
+        self.assertEqual(stmt.name, "move")
+        self.assertEqual(stmt.args, ["N"])
         self.assertIsInstance(prog[0].body[1], Become)
         self.assertEqual(prog[0].body[1].target, "s")
 
     def test_action_without_become(self):
         prog = parse("state s { move(N) x = 1 become s }")
         stmt = prog[0].body[0]
-        self.assertIsInstance(stmt, ActionStmt)
-        self.assertEqual(stmt.func, "move")
+        self.assertIsInstance(stmt, FuncCall)
+        self.assertEqual(stmt.name, "move")
 
 
 class TestExternRegDecl(unittest.TestCase):

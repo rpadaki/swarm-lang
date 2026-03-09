@@ -42,6 +42,7 @@ class FuncDef:
 @dataclass
 class FuncCall:
     name: str
+    args: list[str] = field(default_factory=list)
 
 
 @dataclass
