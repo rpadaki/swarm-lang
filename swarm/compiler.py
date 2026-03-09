@@ -294,10 +294,14 @@ class Compiler:
         return "\n".join(self.out)
 
     def _strip_symbols(self, lines):
+        counter = 0
         remap = {}
-        for i, name in enumerate(self.states):
-            remap[name] = f"_s{i}"
-        remap["main"] = f"_s{len(self.states)}"
+        for line in lines:
+            if line.endswith(":"):
+                name = line[:-1]
+                if name not in remap:
+                    remap[name] = f"_{counter}"
+                    counter += 1
         result = []
         for line in lines:
             if line.endswith(":") and line[:-1] in remap:
