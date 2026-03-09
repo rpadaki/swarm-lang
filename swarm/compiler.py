@@ -714,6 +714,18 @@ class Compiler:
                     for st in s.else_body: self._stmt(st)
                 return
 
+        # Convert >= K / <= K to > K-1 / < K+1 (avoids branch inversion,
+        # enables single-become fast path)
+        if self.opt.cmp_reduce and s.cond[1] in (">=", "<="):
+            right = s.cond[2]
+            rv = self.R(right) if isinstance(right, str) else None
+            if rv is not None and rv.lstrip("-").isdigit():
+                k = int(rv)
+                if s.cond[1] == ">=":
+                    s = IfStmt((s.cond[0], ">", str(k - 1)), s.body, s.else_body)
+                else:
+                    s = IfStmt((s.cond[0], "<", str(k + 1)), s.body, s.else_body)
+
         # Normalize >= and <= by inverting to < and > with swapped branches
         if s.cond[1] in (">=", "<="):
             inv_op = "<" if s.cond[1] == ">=" else ">"
