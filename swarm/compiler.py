@@ -296,21 +296,33 @@ class Compiler:
     def _strip_symbols(self, lines):
         counter = 0
         remap = {}
+        prev_stripped = None
         for line in lines:
             if line.endswith(":"):
                 name = line[:-1]
                 if name not in remap:
-                    remap[name] = f"_{counter}"
-                    counter += 1
+                    if prev_stripped is not None:
+                        remap[name] = prev_stripped
+                    else:
+                        remap[name] = f"_{counter}"
+                        counter += 1
+                prev_stripped = remap[name]
+            else:
+                prev_stripped = None
         result = []
+        prev_label = None
         for line in lines:
             if line.endswith(":") and line[:-1] in remap:
-                result.append(f"{remap[line[:-1]]}:")
-            elif line.lstrip().startswith(("JMP ", "JNE ", "JEQ ", "JGT ", "JLT ")):
-                for old, new in remap.items():
-                    line = re.sub(rf'\b{re.escape(old)}\b', new, line)
-                result.append(line)
+                stripped = f"{remap[line[:-1]]}:"
+                if stripped == prev_label:
+                    continue
+                prev_label = stripped
+                result.append(stripped)
             else:
+                prev_label = None
+                if line.lstrip().startswith(("JMP ", "JNE ", "JEQ ", "JGT ", "JLT ")):
+                    for old, new in remap.items():
+                        line = re.sub(rf'\b{re.escape(old)}\b', new, line)
                 result.append(line)
         return result
 

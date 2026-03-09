@@ -213,6 +213,10 @@ def _reorder_blocks(lines: list[str]) -> list[str]:
             if tci != ci:
                 succ[ci] = tci
 
+    pred: dict[int, list[int]] = {}
+    for ci, tci in succ.items():
+        pred.setdefault(tci, []).append(ci)
+
     placed: set[int] = set()
     order: list[int] = []
 
@@ -225,7 +229,14 @@ def _reorder_blocks(lines: list[str]) -> list[str]:
     place(0)
     for ci in range(len(chains)):
         if ci not in placed:
-            place(ci)
+            root = ci
+            while True:
+                preds = [p for p in pred.get(root, []) if p not in placed]
+                if preds:
+                    root = preds[0]
+                else:
+                    break
+            place(root)
 
     if order == list(range(len(chains))):
         return lines
