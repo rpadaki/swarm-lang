@@ -226,17 +226,19 @@ def _reorder_blocks(lines: list[str]) -> list[str]:
             order.append(ci)
             ci = succ.get(ci)
 
-    place(0)
+    def find_root(ci: int) -> int:
+        root = ci
+        while True:
+            preds = [p for p in pred.get(root, []) if p not in placed]
+            if preds:
+                root = preds[0]
+            else:
+                return root
+
+    place(find_root(0))
     for ci in range(len(chains)):
         if ci not in placed:
-            root = ci
-            while True:
-                preds = [p for p in pred.get(root, []) if p not in placed]
-                if preds:
-                    root = preds[0]
-                else:
-                    break
-            place(root)
+            place(find_root(ci))
 
     if order == list(range(len(chains))):
         return lines

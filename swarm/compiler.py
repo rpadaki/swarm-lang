@@ -291,6 +291,7 @@ class Compiler:
         self.out = dce(self.out, self.opt)
         if self.opt.strip:
             self.out = self._strip_symbols(self.out)
+            self.out = self._remove_dead_labels(self.out)
         return "\n".join(self.out)
 
     def _strip_symbols(self, lines):
@@ -325,6 +326,15 @@ class Compiler:
                         line = re.sub(rf'\b{re.escape(old)}\b', new, line)
                 result.append(line)
         return result
+
+    @staticmethod
+    def _remove_dead_labels(lines):
+        targets = set()
+        for line in lines:
+            if line.lstrip().startswith(("JMP ", "JNE ", "JEQ ", "JGT ", "JLT ")):
+                targets.add(line.split()[-1])
+        targets.add("main")
+        return [l for l in lines if not l.endswith(":") or l[:-1] in targets]
 
     @staticmethod
     def _terminal_become(body):
