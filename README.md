@@ -74,11 +74,11 @@ See [docs/swarm-lang-spec.md](docs/swarm-lang-spec.md) for the full language ref
 
 ### Zed
 
-Clone this repo, then in Zed: `zed: Install Dev Extension` and select `editors/zed/`.
+Install the [zed-swarm](https://github.com/rpadaki/zed-swarm) extension for syntax highlighting, outline symbols, and LSP features (diagnostics, completions, hover, go-to-definition, find references, formatting).
 
-Provides syntax highlighting, outline symbols, and LSP features (diagnostics, completions, hover, go-to-definition, find references, formatting).
+### LSP
 
-Start the LSP manually for other editors:
+Start the language server for other editors:
 
 ```bash
 swarm lsp
@@ -97,8 +97,9 @@ bat cache --build
 ```
 swarm/              Python package (compiler, LSP, linter, formatter)
 lib/ant/            Standard library (sensing, actions, constants)
+parsers/            Tree-sitter grammar
 examples/           Example programs
-editors/            Editor integrations (Zed, bat)
+editors/            Editor integrations (bat, vim)
 docs/               Language and antssembly specs
 tests/              Test suite
 ```
