@@ -38,6 +38,8 @@ def dce(lines: list[str], opt: OptConfig | None = None) -> list[str]:
             lines = _remove_unreferenced_labels(lines)
     if opt.noop_sets:
         lines = _remove_noop_sets(lines)
+    if opt.save_promote:
+        lines = _promote_save(lines)
     if opt.set_op_fusion:
         lines = _fuse_set_op(lines)
     return lines
@@ -290,6 +292,63 @@ def _remove_unreferenced_labels(lines: list[str]) -> list[str]:
                 result.append(line)
         else:
             result.append(line)
+    return result
+
+
+_REG_RE = re.compile(r"^r[0-7]$")
+
+
+def _promote_save(lines: list[str]) -> list[str]:
+    """Eliminate SET rB rA by computing the preceding chain directly into rB.
+
+    When: <ops computing into rA>; SET rB rA; SET rA <new>
+    Becomes: <ops computing into rB>; SET rA <new>
+    """
+    result = list(lines)
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < len(result) - 1:
+            save_m = _SET_RE.match(result[i])
+            if not save_m:
+                i += 1
+                continue
+            rB, rA = save_m.group(1), save_m.group(2)
+            if not (_REG_RE.match(rA) and _REG_RE.match(rB)) or rA == rB:
+                i += 1
+                continue
+            next_m = _SET_RE.match(result[i + 1])
+            if not (next_m and next_m.group(1) == rA):
+                i += 1
+                continue
+            chain_start = None
+            for j in range(i - 1, -1, -1):
+                line = result[j]
+                if not line.strip():
+                    continue
+                if _LABEL_RE.match(line):
+                    break
+                s_m = _SET_RE.match(line)
+                if s_m:
+                    if s_m.group(1) == rA:
+                        if s_m.group(2) != rB:
+                            chain_start = j
+                    break
+                a_m = _ARITH_RE.match(line)
+                if a_m and a_m.group(1) in _ARITH_OPS and a_m.group(2) == rA:
+                    if a_m.group(3) == rB:
+                        break
+                    continue
+                break
+            if chain_start is not None:
+                for j in range(chain_start, i):
+                    if result[j].strip():
+                        result[j] = result[j].replace(rA, rB, 1)
+                result.pop(i)
+                changed = True
+                continue
+            i += 1
     return result
 
 

@@ -14,6 +14,7 @@ class OptConfig:
     unreferenced_labels: bool = True
     noop_sets: bool = True
     set_op_fusion: bool = True
+    save_promote: bool = True
     const_fold: bool = True
     state_reorder: bool = True
     loop_rotate: bool = True
@@ -31,6 +32,7 @@ class OptConfig:
             unreferenced_labels=False,
             noop_sets=False,
             set_op_fusion=False,
+            save_promote=False,
             const_fold=False,
             state_reorder=False,
             loop_rotate=False,
