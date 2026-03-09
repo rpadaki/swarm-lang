@@ -29,6 +29,8 @@ def dce(lines: list[str], opt: OptConfig | None = None) -> list[str]:
             lines = _remove_dead_after_jmp(lines, jump_targets)
         if opt.jmp_chain:
             lines = _collapse_jmp_chains(lines)
+        if opt.block_reorder:
+            lines = _reorder_blocks(lines)
         if opt.jmp_to_next:
             lines = _remove_jmp_to_next(lines)
         lines = _remove_duplicate_labels(lines)
@@ -145,6 +147,96 @@ def _collapse_jmp_chains(lines: list[str]) -> list[str]:
             result.append(line.replace(m.group(1), final[m.group(1)]))
             continue
         result.append(line)
+    return result
+
+
+def _reorder_blocks(lines: list[str]) -> list[str]:
+    """Reorder basic blocks so unconditional JMP targets become fallthroughs.
+
+    Blocks connected by fall-through are grouped into chains.
+    Chains are reordered so each chain's terminal JMP target starts
+    the next chain, allowing jmp_to_next to eliminate the JMP.
+    """
+    blocks: list[tuple[str | None, list[str]]] = []
+    cur_label: str | None = None
+    cur_instrs: list[str] = []
+
+    for line in lines:
+        if _LABEL_RE.match(line):
+            if cur_label is not None or cur_instrs:
+                blocks.append((cur_label, cur_instrs))
+            cur_label = line
+            cur_instrs = []
+        else:
+            cur_instrs.append(line)
+    if cur_label is not None or cur_instrs:
+        blocks.append((cur_label, cur_instrs))
+
+    if len(blocks) <= 1:
+        return lines
+
+    def _terminal_jmp(instrs: list[str]) -> str | None:
+        for i in range(len(instrs) - 1, -1, -1):
+            if not instrs[i].strip():
+                continue
+            m = _JMP_RE.match(instrs[i])
+            return m.group(1) if m else None
+        return None
+
+    chains: list[list[int]] = []
+    chain: list[int] = []
+    for i in range(len(blocks)):
+        chain.append(i)
+        if _terminal_jmp(blocks[i][1]) is not None:
+            chains.append(chain)
+            chain = []
+    if chain:
+        chains.append(chain)
+
+    if len(chains) <= 1:
+        return lines
+
+    label_to_chain: dict[str, int] = {}
+    for ci, ch in enumerate(chains):
+        for bi in ch:
+            lbl = blocks[bi][0]
+            if lbl:
+                m = _LABEL_RE.match(lbl)
+                if m:
+                    label_to_chain[m.group(1)] = ci
+
+    succ: dict[int, int] = {}
+    for ci, ch in enumerate(chains):
+        target = _terminal_jmp(blocks[ch[-1]][1])
+        if target and target in label_to_chain:
+            tci = label_to_chain[target]
+            if tci != ci:
+                succ[ci] = tci
+
+    placed: set[int] = set()
+    order: list[int] = []
+
+    def place(ci: int) -> None:
+        while ci is not None and ci not in placed:
+            placed.add(ci)
+            order.append(ci)
+            ci = succ.get(ci)
+
+    place(0)
+    for ci in range(len(chains)):
+        if ci not in placed:
+            place(ci)
+
+    if order == list(range(len(chains))):
+        return lines
+
+    result: list[str] = []
+    for ci in order:
+        for bi in chains[ci]:
+            label, instrs = blocks[bi]
+            if label:
+                result.append(label)
+            result.extend(instrs)
     return result
 
 

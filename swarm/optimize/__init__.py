@@ -18,6 +18,7 @@ class OptConfig:
     state_reorder: bool = True
     loop_rotate: bool = True
     cmp_reduce: bool = True
+    block_reorder: bool = True
     strip: bool = False
 
     @classmethod
@@ -34,6 +35,7 @@ class OptConfig:
             state_reorder=False,
             loop_rotate=False,
             cmp_reduce=False,
+            block_reorder=False,
         )
 
 
