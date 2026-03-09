@@ -92,7 +92,7 @@ def _compile(args):
         out_file.write_text(output if (opt and opt.strip) else output + "\n")
         print(f"Wrote {out_file}", file=sys.stderr)
     else:
-        if opt.strip:
+        if opt and opt.strip:
             sys.stdout.write(output)
         else:
             print(output)
