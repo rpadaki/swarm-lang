@@ -42,6 +42,10 @@ def dce(lines: list[str], opt: OptConfig | None = None) -> list[str]:
         lines = _promote_save(lines)
     if opt.set_op_fusion:
         lines = _fuse_set_op(lines)
+    if opt.cmp_reduce:
+        lines = _fold_const_ge_le(lines)
+    if opt.call_extract:
+        lines = _extract_bmd_subroutine(lines)
     return lines
 
 
@@ -386,4 +390,225 @@ def _fuse_set_op(lines: list[str]) -> list[str]:
                 skip = True
                 continue
         result.append(line)
+    return result
+
+
+_COND_JMP_RE = re.compile(r"^\s+(JGT|JLT)\s+(\S+)\s+(\S+)\s+(\S+)$")
+_CALL_RE = re.compile(r"^\s+CALL\s+(\S+)\s+(\S+)$")
+
+
+def _fold_const_ge_le(lines: list[str]) -> list[str]:
+    """Fold SET rX C; J(GT|LT) rY rX L; JEQ rY rX L into a single J(GT|LT) rY adj L.
+
+    When rX is set to a compile-time constant C immediately before a
+    two-instruction >= or <= comparison, and rX is immediately overwritten
+    after the branch pair, replace all three instructions with one:
+      JGT rY rX L  (>= C)  ->  JGT rY (C-1) L
+      JLT rY rX L  (<= C)  ->  JLT rY (C+1) L
+    The SET is dead and eliminated along with the redundant JEQ.
+    """
+    result = list(lines)
+    changed = True
+    while changed:
+        changed = False
+        i = 0
+        while i < len(result) - 3:
+            set_m = _SET_RE.match(result[i])
+            if not set_m:
+                i += 1
+                continue
+            rx, const_s = set_m.group(1), set_m.group(2)
+            if not (_REG_RE.match(rx) and const_s.lstrip("-").isdigit()):
+                i += 1
+                continue
+            cj_m = _COND_JMP_RE.match(result[i + 1])
+            if not (cj_m and cj_m.group(3) == rx):
+                i += 1
+                continue
+            jop, ry, lbl = cj_m.group(1), cj_m.group(2), cj_m.group(4)
+            jeq_m2 = re.match(r"^\s+JEQ\s+(\S+)\s+(\S+)\s+(\S+)$", result[i + 2])
+            if not (jeq_m2 and jeq_m2.group(1) == ry and jeq_m2.group(2) == rx and jeq_m2.group(3) == lbl):
+                i += 1
+                continue
+            # Verify rX is immediately overwritten so the SET is dead
+            next_set_m = _SET_RE.match(result[i + 3])
+            if not (next_set_m and next_set_m.group(1) == rx):
+                i += 1
+                continue
+            # Fold: adjust constant and emit single conditional jump
+            c = int(const_s)
+            adj = str(c - 1) if jop == "JGT" else str(c + 1)
+            result[i] = f"  {jop} {ry} {adj} {lbl}"
+            del result[i + 1]  # remove original J(GT|LT) rY rX L
+            del result[i + 1]  # remove JEQ rY rX L
+            changed = True
+        i += 1
+    return result
+
+
+def _find_bmd_blocks(lines: list[str]) -> list[tuple[int, int]]:
+    """Find all occurrences of the 4-direction minimum-pheromone scan block.
+
+    Returns list of (start_idx, end_idx) pairs where start is the index of the
+    first instruction (SNIFF 1 r2 r3) and end is exclusive past the final label.
+    """
+    results = []
+
+    def try_match(start: int) -> int | None:
+        """Return exclusive end index if block matches at start, else None."""
+        labels: dict[str, str] = {}
+        i = start
+
+        def exact(text: str) -> bool:
+            nonlocal i
+            if i >= len(lines) or lines[i].rstrip() != text:
+                return False
+            i += 1
+            return True
+
+        def jmp(opcode: str, *operands: str, role: str) -> bool:
+            nonlocal i
+            if i >= len(lines):
+                return False
+            pat = r"^\s+" + opcode + r"\s+" + r"\s+".join(re.escape(o) for o in operands) + r"\s+(\w+)$"
+            m = re.match(pat, lines[i])
+            if not m:
+                return False
+            lbl = m.group(1)
+            if role in labels and labels[role] != lbl:
+                return False
+            labels[role] = lbl
+            i += 1
+            return True
+
+        def label(role: str) -> bool:
+            nonlocal i
+            if i >= len(lines):
+                return False
+            m = _LABEL_RE.match(lines[i])
+            if not m:
+                return False
+            name = m.group(1)
+            if role in labels and labels[role] != name:
+                return False
+            labels[role] = name
+            i += 1
+            return True
+
+        if not exact("  SNIFF 1 r2 r3"):
+            return None
+        if not jmp("JLT", "r3", "40", role="skip"):
+            return None
+        if not exact("  SET r4 255"):
+            return None
+        if not exact("  SNIFF 1 1 r3"):
+            return None
+        if not jmp("JGT", "r3", "r4", role="l1"):
+            return None
+        if not jmp("JEQ", "r3", "r4", role="l1"):
+            return None
+        if not exact("  SET r4 r3"):
+            return None
+        if not exact("  SET r2 1"):
+            return None
+        if not label("l1"):
+            return None
+        if not exact("  SNIFF 1 2 r3"):
+            return None
+        if not jmp("JGT", "r3", "r4", role="l2"):
+            return None
+        if not jmp("JEQ", "r3", "r4", role="l2"):
+            return None
+        if not exact("  SET r4 r3"):
+            return None
+        if not exact("  SET r2 2"):
+            return None
+        if not label("l2"):
+            return None
+        if not exact("  SNIFF 1 3 r3"):
+            return None
+        if not jmp("JGT", "r3", "r4", role="l3"):
+            return None
+        if not jmp("JEQ", "r3", "r4", role="l3"):
+            return None
+        if not exact("  SET r4 r3"):
+            return None
+        if not exact("  SET r2 3"):
+            return None
+        if not label("l3"):
+            return None
+        if not exact("  SNIFF 1 4 r3"):
+            return None
+        if not jmp("JGT", "r3", "r4", role="l4"):
+            return None
+        if not jmp("JEQ", "r3", "r4", role="l4"):
+            return None
+        if not exact("  SET r2 4"):
+            return None
+        if not label("l4"):
+            return None
+        if not label("skip"):
+            return None
+        return i
+
+    for start in range(len(lines)):
+        if lines[start].rstrip() != "  SNIFF 1 r2 r3":
+            continue
+        end = try_match(start)
+        if end is not None:
+            results.append((start, end))
+    return results
+
+
+_BMD_SUBROUTINE = [
+    "bmd_find:",
+    "  SNIFF 1 r2 r3",
+    "  JLT r3 40 __bmd_exit",
+    "  SET r4 255",
+    "  SNIFF 1 1 r3",
+    "  JGT r3 r4 __bmd_1",
+    "  JEQ r3 r4 __bmd_1",
+    "  SET r4 r3",
+    "  SET r2 1",
+    "__bmd_1:",
+    "  SNIFF 1 2 r3",
+    "  JGT r3 r4 __bmd_2",
+    "  JEQ r3 r4 __bmd_2",
+    "  SET r4 r3",
+    "  SET r2 2",
+    "__bmd_2:",
+    "  SNIFF 1 3 r3",
+    "  JGT r3 r4 __bmd_3",
+    "  JEQ r3 r4 __bmd_3",
+    "  SET r4 r3",
+    "  SET r2 3",
+    "__bmd_3:",
+    "  SNIFF 1 4 r3",
+    "  JGT r3 r4 __bmd_exit",
+    "  JEQ r3 r4 __bmd_exit",
+    "  SET r2 4",
+    "__bmd_exit:",
+    "  JMP r1",
+]
+
+
+def _extract_bmd_subroutine(lines: list[str]) -> list[str]:
+    """Extract duplicate 4-direction minimum-pheromone scan blocks into a CALL/RET subroutine.
+
+    Replaces all matching block occurrences (requires >=2) with CALL r1 bmd_find,
+    then appends the canonical subroutine. Uses r1 as the link register (safe when
+    r1 is dead at every call site through the block's exit).
+    """
+    blocks = _find_bmd_blocks(lines)
+    if len(blocks) < 2:
+        return lines
+
+    result = []
+    prev = 0
+    for start, end in blocks:
+        result.extend(lines[prev:start])
+        result.append("  CALL r1 bmd_find")
+        prev = end
+    result.extend(lines[prev:])
+    result.extend(_BMD_SUBROUTINE)
     return result

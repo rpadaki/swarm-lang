@@ -323,7 +323,7 @@ class Compiler:
                 result.append(stripped)
             else:
                 prev_label = None
-                if line.lstrip().startswith(("JMP ", "JNE ", "JEQ ", "JGT ", "JLT ")):
+                if line.lstrip().startswith(("JMP ", "JNE ", "JEQ ", "JGT ", "JLT ", "CALL ")):
                     for old, new in remap.items():
                         line = re.sub(rf'\b{re.escape(old)}\b', new, line)
                 result.append(line)
@@ -333,7 +333,7 @@ class Compiler:
     def _remove_dead_labels(lines):
         targets = set()
         for line in lines:
-            if line.lstrip().startswith(("JMP ", "JNE ", "JEQ ", "JGT ", "JLT ")):
+            if line.lstrip().startswith(("JMP ", "JNE ", "JEQ ", "JGT ", "JLT ", "CALL ")):
                 targets.add(line.split()[-1])
         targets.add("main")
         return [l for l in lines if not l.endswith(":") or l[:-1] in targets]

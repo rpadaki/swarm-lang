@@ -20,6 +20,7 @@ class OptConfig:
     loop_rotate: bool = True
     cmp_reduce: bool = True
     block_reorder: bool = True
+    call_extract: bool = True
     strip: bool = False
 
     @classmethod
@@ -38,6 +39,7 @@ class OptConfig:
             loop_rotate=False,
             cmp_reduce=False,
             block_reorder=False,
+            call_extract=False,
         )
 
 
