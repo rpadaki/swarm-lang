@@ -46,12 +46,13 @@ def dce(lines: list[str], opt: OptConfig | None = None) -> list[str]:
         lines = _fold_const_ge_le(lines)
     if opt.call_extract:
         lines = _extract_bmd_subroutine(lines)
+        lines = _extract_repeated_sequences(lines)
     return lines
 
 
 def _collect_jump_targets(lines: list[str]) -> set[str]:
     """Collect all labels that are targets of jump instructions."""
-    targets = set()
+    targets = {"main"}  # implicit entry point, never explicitly jumped to
     for line in lines:
         m = _JMP_RE.match(line)
         if m:
@@ -60,6 +61,10 @@ def _collect_jump_targets(lines: list[str]) -> set[str]:
             m = _JUMP_RE.match(line)
             if m:
                 targets.add(m.group(1))
+            else:
+                m = _CALL_RE.match(line)
+                if m:
+                    targets.add(m.group(2))
     return targets
 
 
@@ -123,7 +128,7 @@ def _collapse_jmp_chains(lines: list[str]) -> list[str]:
             if _LABEL_RE.match(lines[j]):
                 break
             jmp_m = _JMP_RE.match(lines[j])
-            if jmp_m:
+            if jmp_m and not _REG_RE.match(jmp_m.group(1)):
                 redirects[label] = jmp_m.group(1)
             break
 
@@ -612,3 +617,300 @@ def _extract_bmd_subroutine(lines: list[str]) -> list[str]:
     result.extend(lines[prev:])
     result.extend(_BMD_SUBROUTINE)
     return result
+
+
+# ---------------------------------------------------------------------------
+# General subroutine factoring
+# ---------------------------------------------------------------------------
+
+_BRANCH_OPS = {"JMP", "JEQ", "JNE", "JGT", "JLT"}
+
+_sub_counter = 0
+
+
+def _norm_instr(line: str) -> str | None:
+    """Normalize an instruction for sequence matching.
+
+    Replace label targets in branch instructions with '@' so that
+    structurally identical sequences with different label names match.
+    Returns None for label lines (they are not instructions).
+    """
+    if _LABEL_RE.match(line):
+        return None
+    stripped = line.strip()
+    if not stripped:
+        return None
+    parts = stripped.split()
+    if not parts:
+        return None
+    op = parts[0]
+    if op in _BRANCH_OPS and len(parts) >= 2:
+        # Last token is the label target — normalize it unless it's a register
+        last = parts[-1]
+        if not _REG_RE.match(last) and not last.lstrip("-").isdigit():
+            parts[-1] = "@"
+    return " ".join(parts)
+
+
+def _extract_repeated_sequences(lines: list[str], min_len: int = 5, max_len: int = 80) -> list[str]:
+    """Find repeated instruction sequences and extract them into CALL/RET subroutines."""
+    global _sub_counter
+    _sub_counter = 0
+    changed = True
+    while changed:
+        changed = False
+        result = _try_one_extraction(lines, min_len, max_len)
+        if result is not None:
+            lines = result
+            changed = True
+    return lines
+
+
+def _build_label_ref_index(lines: list[str]) -> dict[str, set[int]]:
+    """Build a map from label name -> set of line indices that reference it."""
+    refs: dict[str, set[int]] = {}
+    for i, line in enumerate(lines):
+        if _LABEL_RE.match(line):
+            continue
+        m = _CALL_RE.match(line)
+        if m:
+            refs.setdefault(m.group(2), set()).add(i)
+        m = _JUMP_RE.match(line)
+        if m:
+            target = m.group(1)
+            if not _REG_RE.match(target) and not target.lstrip("-").isdigit():
+                refs.setdefault(target, set()).add(i)
+        elif _JMP_RE.match(line):
+            pass  # already caught by JUMP_RE
+    return refs
+
+
+def _try_one_extraction(lines: list[str], min_len: int, max_len: int) -> list[str] | None:
+    """Try to find and extract the single best repeated sequence."""
+    global _sub_counter
+
+    instr_indices: list[int] = []
+    norm_at: dict[int, str] = {}
+    has_call: set[int] = set()
+    for i, line in enumerate(lines):
+        n = _norm_instr(line)
+        if n is not None:
+            instr_indices.append(i)
+            norm_at[i] = n
+            if n.startswith("CALL "):
+                has_call.add(len(instr_indices) - 1)
+
+    if len(instr_indices) < min_len * 2:
+        return None
+
+    label_refs = _build_label_ref_index(lines)
+    norms = [norm_at[instr_indices[p]] for p in range(len(instr_indices))]
+
+    best_savings = 0
+    best_extraction = None
+
+    for length in range(min(max_len, len(instr_indices) // 2), min_len - 1, -1):
+        windows: dict[tuple[str, ...], list[int]] = {}
+        for p in range(len(instr_indices) - length + 1):
+            # Quick check: skip if any instruction in window is CALL
+            if any((p + k) in has_call for k in range(length)):
+                continue
+            key = tuple(norms[p + k] for k in range(length))
+            windows.setdefault(key, []).append(p)
+
+        for key, positions in windows.items():
+            if len(positions) < 2:
+                continue
+
+            chosen = []
+            last_end = -1
+            for p in positions:
+                if p >= last_end:
+                    chosen.append(p)
+                    last_end = p + length
+            if len(chosen) < 2:
+                continue
+
+            extraction = _validate_and_build(lines, instr_indices, chosen, length, label_refs)
+            if extraction is None:
+                continue
+
+            new_lines, savings = extraction
+            if savings > best_savings:
+                best_savings = savings
+                best_extraction = new_lines
+
+        if best_extraction is not None:
+            return best_extraction
+
+    return best_extraction if best_savings > 0 else None
+
+
+def _validate_and_build(
+    lines: list[str],
+    instr_indices: list[int],
+    chosen: list[int],
+    length: int,
+    label_refs: dict[str, set[int]],
+) -> tuple[list[str], int] | None:
+    """Validate occurrences and build the extraction if valid."""
+    global _sub_counter
+
+    count = len(chosen)
+    occurrences: list[tuple[int, int]] = []
+    for p in chosen:
+        start_line = instr_indices[p]
+        end_line = instr_indices[p + length - 1] + 1
+        occurrences.append((start_line, end_line))
+
+    # Collect internal labels for each occurrence
+    all_internal: list[set[str]] = []
+    for start, end in occurrences:
+        internal: set[str] = set()
+        for i in range(start, end):
+            m = _LABEL_RE.match(lines[i])
+            if m:
+                internal.add(m.group(1))
+        all_internal.append(internal)
+
+    # Check internal labels aren't referenced from outside any occurrence
+    for occ_idx, (start, end) in enumerate(occurrences):
+        for lbl in all_internal[occ_idx]:
+            refs = label_refs.get(lbl, set())
+            for ref_line in refs:
+                inside = False
+                for os, oe in occurrences:
+                    if os <= ref_line < oe:
+                        inside = True
+                        break
+                if not inside:
+                    return None
+
+    # For each jump instruction in the sequence, if it targets a non-internal
+    # label (an "exit" jump), all occurrences must target the SAME external label.
+    # Otherwise the subroutine can't be shared.
+    first_internal = all_internal[0]
+    for k in range(length):
+        line0 = lines[instr_indices[chosen[0] + k]]
+        m = _JUMP_RE.match(line0)
+        if not m:
+            m = _JMP_RE.match(line0)
+        if not m:
+            continue
+        target0 = m.group(1) if not _JMP_RE.match(line0) else _JMP_RE.match(line0).group(1)
+        m0 = _JMP_RE.match(line0)
+        target0 = m0.group(1) if m0 else None
+        if target0 is None:
+            m0 = _JUMP_RE.match(line0)
+            target0 = m0.group(1) if m0 else None
+        if target0 is None or _REG_RE.match(target0) or target0.lstrip("-").isdigit():
+            continue
+        if target0 in first_internal:
+            continue
+        # This is an exit jump — verify all occurrences target the same label
+        for occ_idx in range(1, len(chosen)):
+            line_k = lines[instr_indices[chosen[occ_idx] + k]]
+            mk = _JMP_RE.match(line_k)
+            target_k = mk.group(1) if mk else None
+            if target_k is None:
+                mk = _JUMP_RE.match(line_k)
+                target_k = mk.group(1) if mk else None
+            if target_k != target0:
+                return None
+
+    # Check for exit JMP (final instruction is unconditional JMP to label)
+    has_exit_jmp = False
+    jmp_m = _JMP_RE.match(lines[instr_indices[chosen[0] + length - 1]])
+    if jmp_m and not _REG_RE.match(jmp_m.group(1)):
+        has_exit_jmp = True
+
+    # Find safe link register
+    first_start, first_end = occurrences[0]
+    used_regs: set[str] = set()
+    for i in range(first_start, first_end):
+        for reg in re.findall(r'\br[0-7]\b', lines[i]):
+            used_regs.add(reg)
+
+    link_reg = None
+    if "r0" not in used_regs:
+        link_reg = "r0"
+    else:
+        for r in range(7, -1, -1):
+            rname = f"r{r}"
+            if rname in used_regs:
+                continue
+            safe = True
+            for start, _end in occurrences:
+                prev_idx = start - 1
+                while prev_idx >= 0 and not lines[prev_idx].strip():
+                    prev_idx -= 1
+                if prev_idx < 0:
+                    safe = False
+                    break
+                prev_m = _SET_RE.match(lines[prev_idx])
+                if not (prev_m and prev_m.group(1) == rname):
+                    safe = False
+                    break
+            if safe:
+                link_reg = rname
+                break
+
+    if link_reg is None:
+        return None
+
+    if has_exit_jmp:
+        call_cost = 2 * count
+        sub_len = length
+    else:
+        call_cost = count
+        sub_len = length + 1
+
+    savings = length * count - (call_cost + sub_len)
+    if savings < 2:
+        return None
+
+    _sub_counter += 1
+    sub_name = f"__sub_{_sub_counter}"
+
+    first_start, first_end = occurrences[0]
+    sub_lines_raw = lines[first_start:first_end]
+
+    internal_label_map: dict[str, str] = {}
+    label_count = 0
+    for line in sub_lines_raw:
+        m = _LABEL_RE.match(line)
+        if m:
+            label_count += 1
+            internal_label_map[m.group(1)] = f"__{sub_name}_{label_count}"
+
+    sub_lines: list[str] = [f"{sub_name}:"]
+    for line in sub_lines_raw:
+        m = _LABEL_RE.match(line)
+        if m and m.group(1) in internal_label_map:
+            sub_lines.append(f"{internal_label_map[m.group(1)]}:")
+            continue
+        new_line = line
+        for old_lbl, new_lbl in internal_label_map.items():
+            new_line = new_line.replace(old_lbl, new_lbl)
+        if has_exit_jmp and line is sub_lines_raw[-1]:
+            sub_lines.append(f"  JMP {link_reg}")
+        else:
+            sub_lines.append(new_line)
+    if not has_exit_jmp:
+        sub_lines.append(f"  JMP {link_reg}")
+
+    result: list[str] = []
+    prev = 0
+    for occ_idx, (start, end) in enumerate(occurrences):
+        result.extend(lines[prev:start])
+        result.append(f"  CALL {link_reg} {sub_name}")
+        if has_exit_jmp:
+            exit_jmp_line = lines[instr_indices[chosen[occ_idx] + length - 1]]
+            exit_m = _JMP_RE.match(exit_jmp_line)
+            if exit_m:
+                result.append(f"  JMP {exit_m.group(1)}")
+        prev = end
+    result.extend(lines[prev:])
+    result.extend(sub_lines)
+
+    return result, savings
