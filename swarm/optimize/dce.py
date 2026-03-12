@@ -675,13 +675,16 @@ def _build_label_ref_index(lines: list[str]) -> dict[str, set[int]]:
         m = _CALL_RE.match(line)
         if m:
             refs.setdefault(m.group(2), set()).add(i)
+        m = _JMP_RE.match(line)
+        if m:
+            target = m.group(1)
+            if not _REG_RE.match(target) and not target.lstrip("-").isdigit():
+                refs.setdefault(target, set()).add(i)
         m = _JUMP_RE.match(line)
         if m:
             target = m.group(1)
             if not _REG_RE.match(target) and not target.lstrip("-").isdigit():
                 refs.setdefault(target, set()).add(i)
-        elif _JMP_RE.match(line):
-            pass  # already caught by JUMP_RE
     return refs
 
 
